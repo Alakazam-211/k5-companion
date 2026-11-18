@@ -242,9 +242,12 @@ describe("Thread follows the newest", () => {
     const row = bubble.closest("[data-thread-msg]") as HTMLElement;
     const meta = row.querySelector('[data-testid="thread-msg-meta"]') as HTMLElement;
     expect(meta.textContent).toMatch(/^aspen•.*\d{1,2}:\d{2} [AP]M$/);
-    // Meta first, then the bubble; no time line under it.
+    // Meta first, then the bubble (in its box, where a sender's picture
+    // would sit); no time line under it.
     expect(row.firstElementChild).toBe(meta);
-    expect(row.lastElementChild?.getAttribute("data-testid")).toBe("thread-bubble");
+    const box = row.lastElementChild as HTMLElement;
+    expect(box.hasAttribute("data-thread-bubble-box")).toBe(true);
+    expect(box.firstElementChild?.getAttribute("data-testid")).toBe("thread-bubble");
   });
 
   it("the pill keeps the keyboard up and finishes a glide the WebView dropped", async () => {

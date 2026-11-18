@@ -221,7 +221,8 @@
    the column eases in as the row's left margin (0 to the column), and the
    picture fades and grows in; the reverse on the way out. 200 ms ease-out,
    none with reduced motion. The margin keeps the bubble's width, so
-   nothing re-wraps. */
+   nothing re-wraps. The picture sits at the bottom left of a run's last
+   bubble, level with its tail (ThreadPane / HomeChatMessageRow). */
 [data-sender-column] {
   transition: margin-left 200ms ease-out;
 }

@@ -169,7 +169,10 @@ describe("gate", () => {
 });
 
 describe("profile pictures (two or more other senders)", () => {
-  it("are off with one other sender; on with two, beside each run's first bubble only", () => {
+  const rowOf = (id: string) => document.querySelector(`[data-row-key="${id}"]`) as HTMLElement;
+  const pic = (id: string) => rowOf(id).querySelector('[data-testid="thread-msg-picture"]');
+
+  it("are off with one other sender; on with two, beside each run's last bubble only", () => {
     room([message("m1", 1, "hi", [], "sales"), message("m2", 2, "again", [], "sales")]);
     const { unmount } = render(<ThreadPane />);
     // Off: the picture waits faded in a closed column, so it can animate in.
@@ -177,12 +180,67 @@ describe("profile pictures (two or more other senders)", () => {
     expect(off).toHaveLength(1);
     expect(off[0].getAttribute("aria-hidden")).toBe("true");
     expect(off[0].closest("[data-sender-column]")?.getAttribute("data-sender-column")).toBe("off");
+    expect(pic("m2")).toBeTruthy();
     unmount();
     room([message("m1", 1, "hi", [], "sales"), message("m2", 2, "again", [], "sales"), message("m3", 3, "me too", [], "ops")]);
     render(<ThreadPane />);
     const pics = screen.getAllByTestId("thread-msg-picture");
     expect(pics).toHaveLength(2);
     expect(pics.every((p) => p.closest("[data-sender-column]")?.getAttribute("data-sender-column") === "on")).toBe(true);
+    // The run's last (m2), not its first (m1); the name stays over the first.
+    expect(pic("m1")).toBeNull();
+    expect(pic("m2")).toBeTruthy();
+    expect(pic("m3")).toBeTruthy();
+    expect(rowOf("m1").querySelector('[data-testid="thread-msg-meta"]')).toBeTruthy();
+    expect(rowOf("m2").querySelector('[data-testid="thread-msg-meta"]')).toBeNull();
+    // Every bubble of theirs gets the column, so they line up.
+    expect(["m1", "m2", "m3"].map((id) => rowOf(id).style.marginLeft)).toEqual(["36px", "36px", "36px"]);
+    // Bottom left, against the bubble (its box), level with the tail.
+    expect(pic("m2")!.className).toContain("bottom-0");
+    expect(pic("m2")!.parentElement!.hasAttribute("data-thread-bubble-box")).toBe(true);
+    expect(pic("m2")!.parentElement!.querySelector('[data-tail="theirs"]')).toBeTruthy();
+  });
+
+  it("files under the bubble never push the picture down: it stays in the bubble's box", () => {
+    room([message("m1", 1, "report", [file()], "sales"), message("m2", 2, "ok", [], "ops")]);
+    render(<ThreadPane />);
+    const box = pic("m1")!.parentElement!;
+    expect(box.hasAttribute("data-thread-bubble-box")).toBe(true);
+    expect(box.querySelector('[data-testid="thread-files"]')).toBeNull();
+    expect(rowOf("m1").querySelector('[data-testid="thread-files"]')).toBeTruthy();
+  });
+
+  it("a new message from the same sender takes the picture down to it", () => {
+    room([message("m1", 1, "hi", [], "sales"), message("m2", 2, "again", [], "ops")]);
+    render(<ThreadPane />);
+    expect(pic("m2")).toBeTruthy();
+    act(() => {
+      useZenStore.setState({
+        thread: [message("m1", 1, "hi", [], "sales"), message("m2", 2, "again", [], "ops"), message("m3", 3, "more", [], "ops")],
+      });
+    });
+    expect(pic("m2")).toBeNull();
+    expect(pic("m3")).toBeTruthy();
+  });
+
+  it("stay on once on, while the Thread is open", () => {
+    room([message("m1", 1, "hi", [], "sales"), message("m2", 2, "again", [], "ops")]);
+    render(<ThreadPane />);
+    expect(rowOf("m2").getAttribute("data-sender-column")).toBe("on");
+    // The other sender's message leaves the loaded list: still on.
+    act(() => {
+      useZenStore.setState({ thread: [message("m2", 2, "again", [], "ops"), message("m3", 3, "more", [], "ops")] });
+    });
+    expect(rowOf("m3").getAttribute("data-sender-column")).toBe("on");
+  });
+
+  it("a deleted message ends the run and draws no picture", () => {
+    const gone: ThreadMessage = { ...message("m2", 2, "gone", [], "sales"), text: "", deleted: true };
+    room([message("m1", 1, "hi", [], "sales"), gone, message("m3", 3, "next", [], "ops")]);
+    render(<ThreadPane />);
+    expect(pic("m1")).toBeTruthy();
+    expect(screen.getByTestId("thread-msg-deleted").querySelector('[data-testid="thread-msg-picture"]')).toBeNull();
+    expect(pic("m3")).toBeTruthy();
   });
 });
 

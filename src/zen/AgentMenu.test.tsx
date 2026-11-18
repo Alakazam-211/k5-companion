@@ -17,7 +17,7 @@ vi.mock("../lib/badgeTotals", () => ({
 import * as api from "../api/threadRead";
 import { __resetScopesForTests, noteBootStatus } from "../api/scope";
 import { useServersStore } from "../stores/servers";
-import { AgentMenu, agentMenuPlacement, liftedMenuPlacement, type AgentMenuEntry } from "./AgentMenu";
+import { AgentMenu, agentMenuPlacement, liftCopy, liftedMenuPlacement, type AgentMenuEntry } from "./AgentMenu";
 import { unreadKey, type UnreadEntry } from "./unread";
 import { __resetUnreadStoreForTests, useUnreadStore } from "./unreadStore";
 import { menuLabels, tap } from "../test/rearrangeDrag";
@@ -202,5 +202,18 @@ describe("AgentMenu", () => {
     expect(screen.getByTestId("agent-menu-backdrop").style.background).toBe("transparent");
     expect(screen.queryByTestId("agent-menu-lifted")).toBeNull();
     expect(screen.getByTestId("agent-menu").style.background).toBe("");
+  });
+});
+
+describe("liftCopy", () => {
+  it("leaves what is marked data-lift-skip on the page (a sender's picture), and strips test ids", () => {
+    const el = document.createElement("div");
+    el.innerHTML = '<div data-testid="bubble">hi</div><span data-lift-skip="" data-thread-picture="">A</span>';
+    const copy = liftCopy(el, 200);
+    expect(copy.querySelector("[data-thread-picture]")).toBeNull();
+    expect(copy.querySelector("[data-testid]")).toBeNull();
+    expect(copy.textContent).toBe("hi");
+    // The original keeps its picture.
+    expect(el.querySelector("[data-thread-picture]")).toBeTruthy();
   });
 });

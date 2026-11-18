@@ -8,6 +8,8 @@ import {
   channelPerms,
   deleteTitle,
   firstLine,
+  homeChatColumnOn,
+  homeChatFace,
   homeChatRows,
   leaveCopy,
   memberNames,
@@ -187,6 +189,39 @@ describe("rows", () => {
   it("names the other person's runs in a DM", () => {
     const rows = homeChatRows([msg("1", "2"), msg("2", "1")], "1", names, "dm");
     expect(rows.map((r) => (r.kind === "message" ? r.name : "call"))).toEqual(["Ana Diaz", null]);
+  });
+
+  it("a channel: the sender column on everyone else's, the picture on each run's last; never on yours", () => {
+    const rows = homeChatRows(
+      [msg("1", "2"), msg("2", "2"), msg("3", "1"), msg("4", "3"), msg("5", "2", "", { deleted: true }), msg("6", "2")],
+      "1",
+      names,
+      "channel"
+    );
+    const m = rows.filter((r): r is Extract<typeof r, { kind: "message" }> => r.kind === "message");
+    expect(m.map((r) => r.column)).toEqual([true, true, false, true, true, true]);
+    // The deleted line ends Ana's run and draws no picture itself.
+    expect(m.map((r) => r.picture)).toEqual([false, true, false, true, false, true]);
+  });
+
+  it("a channel with one other person still has the column (always on)", () => {
+    const rows = homeChatRows([msg("1", "2"), msg("2", "2")], "1", names, "channel");
+    expect(rows.map((r) => (r.kind === "message" ? [r.column, r.picture] : null))).toEqual([
+      [true, false],
+      [true, true],
+    ]);
+  });
+
+  it("a DM: never a column or a picture", () => {
+    const rows = homeChatRows([msg("1", "2"), msg("2", "2"), msg("3", "1"), msg("4", "2")], "1", names, "dm");
+    expect(rows.every((r) => r.kind === "message" && !r.column && !r.picture)).toBe(true);
+    expect(homeChatColumnOn("dm")).toBe(false);
+    expect(homeChatColumnOn("channel")).toBe(true);
+  });
+
+  it("a member's face: their name, username and picture; someone unlisted reads Someone", () => {
+    expect(homeChatFace(people, "2")).toEqual({ username: "ana", name: "Ana Diaz", picture: null });
+    expect(homeChatFace(people, "77")).toEqual({ username: "77", name: "Someone", picture: null });
   });
 
   it("lists who is typing, never you", () => {

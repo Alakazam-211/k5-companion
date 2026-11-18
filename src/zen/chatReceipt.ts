@@ -57,6 +57,13 @@ export function chatRuns(rows: readonly RunInput[], gapS = RUN_GAP_S): RunPos[] 
   }));
 }
 
+/** The rows that draw the sender's picture (threadPictures.ts): the last
+ *  of each run from someone else, where the tail goes. A deleted line ends
+ *  a run but draws none. */
+export function pictureRows(rows: readonly { mine: boolean; deleted?: boolean }[], runs: readonly RunPos[]): boolean[] {
+  return rows.map((r, i) => !r.mine && !r.deleted && !!runs[i]?.last);
+}
+
 export type Receipt = "delivered" | "read";
 export type ReceiptInput = {
   mine: boolean;

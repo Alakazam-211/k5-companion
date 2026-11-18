@@ -12,6 +12,8 @@
 //
 // What differs:
 //   - names over every run in a channel; in a DM only the other person's;
+//   - a channel's sender pictures beside the tail of each run's last
+//     bubble (never in a DM: one other person);
 //   - the hold menu lifts the held bubble above a dim, the six quick emoji
 //     above it, then Reply, Copy, Save to stash, More emoji…; chips under bubbles;
 //   - Reply sends Sew's reference (`replyTo`), and the quote strip jumps
@@ -55,6 +57,7 @@ import {
   authorName,
   convKey,
   firstLine,
+  homeChatFace,
   homeChatRows,
   homeChatStashSource,
   memberNames,
@@ -62,6 +65,7 @@ import {
   replyPreview,
   sendFailedNote,
   typingNames,
+  type HomeChatFace,
   type HomeChatTarget,
   type JumpMiss,
 } from "./homeChatModel";
@@ -607,6 +611,19 @@ export function HomeChatView({
 
   // ── Rows ──
   const rows = useMemo(() => homeChatRows(messages, me, names, target.kind), [messages, me, names, target.kind]);
+  // The sender pictures (a channel's): one object per member while the
+  // people answer holds, so the memoized rows compare them by identity.
+  const faces = useMemo(() => {
+    const out = new Map<string, HomeChatFace>();
+    return (authorId: string): HomeChatFace => {
+      let f = out.get(authorId);
+      if (!f) {
+        f = homeChatFace(people, authorId);
+        out.set(authorId, f);
+      }
+      return f;
+    };
+  }, [people]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   const typingNow = useMemo(
     () => typingNames(roster ? typingMembers(roster, Date.now(), me) : [], me, names),
@@ -818,6 +835,8 @@ export function HomeChatView({
                     mine={r.mine}
                     name={r.name}
                     run={r.run}
+                    column={r.column}
+                    face={r.picture ? faces(r.m.authorId) : null}
                     reply={r.m.replyTo ? replyPreview(byId.get(r.m.replyTo), me, names) : null}
                     flash={flashId === r.m.id}
                     held={msgHold.menu?.id === r.m.id}

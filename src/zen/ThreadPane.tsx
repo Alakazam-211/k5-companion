@@ -13,7 +13,7 @@ import {
 } from "react";
 import { SENDING_OPACITY, useDeliverBrighten } from "./useDeliverBrighten";
 import { WorkspaceAvatar } from "./WorkspaceAvatar";
-import { chatRuns, receiptFor, receiptRow } from "./chatReceipt";
+import { chatRuns, pictureRows, receiptFor, receiptRow } from "./chatReceipt";
 import {
   clearThreadSearchPaint,
   currentMatchIndex,
@@ -704,8 +704,9 @@ const ThreadRow = memo(function ThreadRow({
   /** Someone else's row: the sender column is shown (threadPictures).
    *  Undefined on your own rows, which never move. */
   pictureOn?: boolean;
-  /** The first of a run from someone else: the sender's picture, drawn
-   *  in the column and faded out while it's off, so both ways animate. */
+  /** The last of a run from someone else (pictureRows): the sender's
+   *  picture, at the bubble's bottom left, level with its tail; drawn in
+   *  the column and faded out while it's off, so both ways animate. */
   picture?: SenderPicture | null;
   /** The sender's name above the run (senderLabel): an agent's display
    *  name, not its handle. Falls back to `m.from`. */
@@ -735,6 +736,48 @@ const ThreadRow = memo(function ThreadRow({
   }
   const wordless = !m.text.trim() && !m.choice;
   const bubble = !(files && wordless);
+  // Someone else's row (the sender column, on or off).
+  const column = pictureOn !== undefined;
+  const pictureNode =
+    picture && column ? (
+      <span
+        className="absolute bottom-0"
+        style={{ left: -(THREAD_PICTURE_PX + THREAD_PICTURE_GAP) }}
+        aria-hidden={!pictureOn}
+        data-thread-picture=""
+        data-testid="thread-msg-picture"
+      >
+        <WorkspaceAvatar
+          initial={picture.initial}
+          color={picture.color}
+          iconUrl={picture.iconUrl}
+          size={THREAD_PICTURE_PX}
+          fontSize={12}
+          fallback="#2c2c2e"
+        />
+      </span>
+    ) : null;
+  const bubbleNode = bubble ? (
+    <Bubble
+      m={m}
+      onFileLink={onFileLink}
+      canAnswer={canAnswer}
+      answerHeld={answerHeld}
+      answering={answering}
+      answerError={answerError}
+      onAnswer={onAnswer}
+      attachments={out?.files.length ? out.files : undefined}
+      flying={flying}
+      fadeIn={fadeIn}
+      breathe={out?.status === "sending"}
+      tail={runLast ? (m.mine ? "mine" : "theirs") : null}
+      holdable={messageHoldable(m, out)}
+      outlined={highlighted}
+      onStashOffer={onStashOffer}
+      foldKey={rowKey}
+      reveal={revealed}
+    />
+  ) : null;
   return (
     <div
       data-thread-msg=""
@@ -779,45 +822,20 @@ const ThreadRow = memo(function ThreadRow({
           </span>
         </span>
       ) : null}
-      {picture && pictureOn !== undefined ? (
-        <span
-          className="absolute top-0"
-          style={{ left: -(THREAD_PICTURE_PX + THREAD_PICTURE_GAP) }}
-          aria-hidden={!pictureOn}
-          data-thread-picture=""
-          data-testid="thread-msg-picture"
-        >
-          <WorkspaceAvatar
-            initial={picture.initial}
-            color={picture.color}
-            iconUrl={picture.iconUrl}
-            size={THREAD_PICTURE_PX}
-            fontSize={12}
-            fallback="#2c2c2e"
-          />
-        </span>
-      ) : null}
-      {bubble ? (
-        <Bubble
-          m={m}
-          onFileLink={onFileLink}
-          canAnswer={canAnswer}
-          answerHeld={answerHeld}
-          answering={answering}
-          answerError={answerError}
-          onAnswer={onAnswer}
-          attachments={out?.files.length ? out.files : undefined}
-          flying={flying}
-          fadeIn={fadeIn}
-          breathe={out?.status === "sending"}
-          tail={runLast ? (m.mine ? "mine" : "theirs") : null}
-          holdable={messageHoldable(m, out)}
-          outlined={highlighted}
-          onStashOffer={onStashOffer}
-          foldKey={rowKey}
-          reveal={revealed}
-        />
-      ) : null}
+      {/* Someone else's: the bubble in its own box, so the picture sits
+          against it (bottom left, level with the tail) and the files under
+          it never push it down. Always boxed, so the picture moving to a
+          newer bubble never remounts this one. No bubble (files only): the
+          picture at the row's bottom. */}
+      {bubbleNode && column ? (
+        <div className="relative min-w-0 max-w-full" data-thread-bubble-box="">
+          {bubbleNode}
+          {pictureNode}
+        </div>
+      ) : (
+        bubbleNode
+      )}
+      {!bubbleNode ? pictureNode : null}
       {files ? (
         <MessageFiles
           files={files}
@@ -2650,7 +2668,10 @@ export function ThreadPane({
   // iMessage runs (tails, tighter spacing, one meta line per run) and the
   // one "Delivered" / "Read" receipt (chatReceipt.ts). A send still flying
   // in (or fading in) is not confirmed yet: the label moves once it lands.
-  const runs = chatRuns(rows.map(({ m }) => ({ mine: m.mine, from: m.from, at: m.at, deleted: !!m.deleted })));
+  const runInputs = rows.map(({ m }) => ({ mine: m.mine, from: m.from, at: m.at, deleted: !!m.deleted }));
+  const runs = chatRuns(runInputs);
+  // The sender's picture: on the last bubble of each of someone else's runs.
+  const pictureAt = pictureRows(runInputs, runs);
   const pictureCache = useRef(new Map<string, SenderPicture>());
   const picturesOn = useThreadPicturesOn(
     `${zenServer}\n${groupId || agentId || ""}`,
@@ -2979,7 +3000,7 @@ export function ThreadPane({
                     files={files}
                     imagesOn={imagesOn}
                     pictureOn={m.mine ? undefined : picturesOn}
-                    picture={!m.mine && run.first ? pictureFor(m.from) : null}
+                    picture={pictureAt[i] ? pictureFor(m.from) : null}
                     fromLabel={!m.mine && run.first ? senderLabel(m.from, agents) : undefined}
                     runFirst={run.first}
                     runLast={run.last}

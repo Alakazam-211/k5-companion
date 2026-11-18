@@ -111,6 +111,13 @@ describe("the DM", () => {
     expect(api.ackHomeChat).toHaveBeenCalledWith(expect.anything(), "9");
   });
 
+  it("never draws sender pictures, nor the column", () => {
+    seed([msg("10", ANA, "hi"), msg("11", ANA, "there"), msg("12", ME, "hello"), msg("13", ANA, "again")]);
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    expect(screen.queryAllByTestId("home-chat-msg-picture")).toHaveLength(0);
+    expect(document.querySelectorAll("[data-sender-column]")).toHaveLength(0);
+  });
+
   it("shows who is typing on the composer's edge", () => {
     seed([msg("10", ANA, "hi")]);
     useHomeChatStore.setState({ typing: { [KEY]: { [ANA]: Date.now() + 5000 } } });
@@ -282,6 +289,54 @@ describe("the channel", () => {
     render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
     expect(screen.getAllByTestId("home-chat-msg-name").map((n) => n.textContent)).toEqual(["Ana Diaz", "Ben Ito", "Ana Diaz"]);
     expect(screen.getByTestId("home-chat-title").textContent).toBe("#design");
+  });
+
+  it("sender pictures: beside the last bubble of each run of someone else's, in the bubble's box", () => {
+    seed([
+      msg("10", ANA, "a", { reactions: [{ emoji: "🎉", count: 1, me: false }] }),
+      msg("11", ANA, "b", { reactions: [{ emoji: "🎉", count: 1, me: false }] }),
+      msg("12", BEN, "c"),
+      msg("13", ME, "mine"),
+    ]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    const rows = screen.getAllByTestId("home-chat-msg");
+    const pic = (row: HTMLElement) => row.querySelector('[data-testid="home-chat-msg-picture"]');
+    expect(rows.map((r) => !!pic(r))).toEqual([false, true, true, false]);
+    // Every bubble of someone else's sits past the column; yours never.
+    expect(rows.map((r) => r.getAttribute("data-sender-column"))).toEqual(["on", "on", "on", null]);
+    expect(rows[3].style.marginLeft).toBe("");
+    // Against the bubble (its box), so the chips under it never push it down.
+    const box = pic(rows[1])!.parentElement!;
+    expect(box.hasAttribute("data-home-chat-bubble-box")).toBe(true);
+    expect(box.querySelector('[data-testid="home-chat-bubble"]')).toBeTruthy();
+    expect(box.querySelector('[data-testid="home-chat-reaction"]')).toBeNull();
+    expect(pic(rows[1])!.querySelector('[data-person-avatar="initials"]')?.textContent).toBe("AD");
+  });
+
+  it("a new message from the same sender moves the picture down to it", () => {
+    seed([msg("10", ANA, "a"), msg("11", ANA, "b")]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    const where = () => screen.getAllByTestId("home-chat-msg").map((r) => !!r.querySelector('[data-testid="home-chat-msg-picture"]'));
+    expect(where()).toEqual([false, true]);
+    act(() => {
+      useHomeChatStore.getState().patchConv(KEY, { messages: [msg("10", ANA, "a"), msg("11", ANA, "b"), msg("12", ANA, "c")], hasMore: false, loaded: true });
+    });
+    expect(where()).toEqual([false, false, true]);
+  });
+
+  it("a deleted message ends the run and draws no picture", () => {
+    seed([msg("10", ANA, "a"), msg("11", ANA, "", { deleted: true })]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    expect(screen.getByTestId("home-chat-msg").querySelector('[data-testid="home-chat-msg-picture"]')).toBeTruthy();
+    expect(screen.getByTestId("home-chat-msg-deleted").querySelector('[data-testid="home-chat-msg-picture"]')).toBeNull();
+  });
+
+  it("the hold menu lifts the bubble without its sender's picture", () => {
+    seed([msg("10", ANA, "a")]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    fireEvent.contextMenu(screen.getByTestId("home-chat-bubble"));
+    expect(screen.getAllByTestId("home-chat-msg-picture")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-thread-picture]")).toHaveLength(1);
   });
 
   it("the header opens the members sheet; Delete asks with Keep it focused", async () => {

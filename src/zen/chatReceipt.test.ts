@@ -1,7 +1,7 @@
 // iMessage runs (tails on the last bubble of a run) and the one
 // "Delivered" / "Read" receipt.
 import { describe, expect, it } from "vitest";
-import { READ_SLACK_MS, RUN_GAP_S, chatRuns, readByTurn, receiptFor, receiptRow } from "./chatReceipt";
+import { READ_SLACK_MS, RUN_GAP_S, chatRuns, pictureRows, readByTurn, receiptFor, receiptRow } from "./chatReceipt";
 
 const me = (at: number | null) => ({ mine: true, from: "bob", at });
 const aspen = (at: number | null) => ({ mine: false, from: "aspen", at });
@@ -74,5 +74,27 @@ describe("the receipt", () => {
     const rows = [{ mine: true, confirmed: true, at }];
     expect(receiptFor(rows, 0, { readSignals: true, turn: turn(at * 1000 + 300) })).toBe("read");
     expect(receiptFor(rows, 0, { readSignals: false, turn: turn(at * 1000 + 300) })).toBe("delivered");
+  });
+});
+
+describe("pictureRows (the sender's picture beside a run's last bubble)", () => {
+  const sew = (at: number | null, deleted = false) => ({ mine: false, from: "sew", at, deleted });
+  const at = (rows: Parameters<typeof chatRuns>[0]) => pictureRows(rows, chatRuns(rows));
+
+  it("draws on the last bubble of each of someone else's runs, never yours", () => {
+    expect(at([aspen(100), aspen(110), me(120), sew(130), sew(140), aspen(150)])).toEqual([false, true, false, false, true, true]);
+  });
+
+  it("a new message from the same sender takes the picture down to it", () => {
+    expect(at([aspen(100), aspen(110)])).toEqual([false, true]);
+    expect(at([aspen(100), aspen(110), aspen(120)])).toEqual([false, false, true]);
+  });
+
+  it("a gap ends a run: each side gets its own picture", () => {
+    expect(at([aspen(100), aspen(100 + RUN_GAP_S + 1)])).toEqual([true, true]);
+  });
+
+  it("a deleted line ends a run but draws no picture", () => {
+    expect(at([sew(100), sew(110), sew(120, true), sew(130)])).toEqual([false, true, false, true]);
   });
 });
