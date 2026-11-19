@@ -50,9 +50,38 @@ r = K2DeliveredClear.toRemove(fresh, server: srv, op: .read([C(kind:"thread", id
 check(r == ["t5"], "a read clears the chat's alert, not its card's: \(r)")
 r = K2DeliveredClear.toRemove(fresh, server: srv, op: .keepOnly([]), before: t0.addingTimeInterval(-10))
 check(r == ["card"], "nothing left: the old card goes, too-new alerts wait: \(r)")
-func shape(_ o: [K2DeliveredClear.Op]) -> [String] { o.map { if case .read = $0 { return "read" } else { return "keepOnly" } } }
+func shape(_ o: [K2DeliveredClear.Op]) -> [String] {
+  o.map {
+    switch $0 {
+    case .read: return "read"
+    case .keepOnly: return "keepOnly"
+    case .clearHome: return "clearHome"
+    }
+  }
+}
 check(shape(K2DeliveredClear.silentOps(unread: 0, waiting: 0, hints: wire)) == ["read","keepOnly"], "totals 0 with hints: both, hints first")
 check(shape(K2DeliveredClear.silentOps(unread: 0, waiting: nil, hints: [])) == ["keepOnly"], "bare badge at 0, no waitingTotal: keepOnly")
 check(shape(K2DeliveredClear.silentOps(unread: 0, waiting: 1, hints: [])).isEmpty, "a card waiting, no hints: nothing")
 check(shape(K2DeliveredClear.silentOps(unread: 3, waiting: 0, hints: wire)) == ["read"], "unread left: hints only")
+// K2 0.46.16 Home chat: `h:` hints by message id (Sew ids, numbers), the
+// generic lane only on homeUnread 0, and keepOnly never touches them.
+let home = [
+  note("h1", ["kind":"home_chat","conversationId":"901","messageId":"880011","badgeKey":"abc"], 900),
+  note("h2", ["kind":"home_chat","conversationId":"901","messageId":"880012","badgeKey":"abc"], 900),
+  note("h3", ["kind":"home_chat","conversationId":"902","messageId":"7","badgeKey":"abc"], 900),
+  note("hg", ["kind":"home_chat","badgeKey":"abc"], 900),
+  note("hx", ["kind":"home_chat","conversationId":"901","messageId":"1","badgeKey":"other"], 900),
+  note("big", ["kind":"home_chat","conversationId":"903","messageId":"9007199254740993","badgeKey":"abc"], 900),
+]
+let hh = K2DeliveredClear.parseReadHints("h:901:880011,h:903:9007199254740992,t:c-1:4")
+check(hh == [C(kind:"home", id:"901", seq:880011), C(kind:"home", id:"903", seq:9007199254740992), C(kind:"thread", id:"c-1", seq:4)], "h: hints parse: \(hh)")
+r = K2DeliveredClear.toRemove(home, server: srv, op: .read(hh), before: t0)
+check(r == ["h1"], "h:901:880011 clears h1 only; past 2^53 compares exactly (big stays): \(r)")
+r = K2DeliveredClear.toRemove(home, server: srv, op: .keepOnly([]), before: t0)
+check(r.isEmpty, "Thread totals at 0 never clear Home chat: \(r)")
+r = K2DeliveredClear.toRemove(home, server: srv, op: .clearHome, before: t0)
+check(Set(r) == ["h1","h2","h3","hg","big"], "homeUnread 0 clears every Home chat note of this login, generic too: \(r)")
+check(shape(K2DeliveredClear.silentOps(unread: 0, waiting: 0, hints: [], homeUnread: 0)) == ["keepOnly","clearHome"], "both counts 0: keepOnly then clearHome")
+check(shape(K2DeliveredClear.silentOps(unread: 2, waiting: 0, hints: [], homeUnread: nil)).isEmpty, "no homeUnread: Home chat left alone")
+check(shape(K2DeliveredClear.silentOps(unread: 2, waiting: 0, hints: hh, homeUnread: 3)) == ["read"], "Home unread left: hints only")
 print(fails == 0 ? "ALL OK" : "\(fails) FAILED")
