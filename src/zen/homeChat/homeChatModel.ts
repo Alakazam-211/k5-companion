@@ -9,6 +9,7 @@
 import { HOME_CHAT_CHANNEL_NAME_MAX, type HomeChatMessage, type HomeChatPeople, type HomeChatPerson } from "../../api/homeChatPure";
 import { QUICK_REACTIONS } from "../../api/homeChatHelpers";
 import { chatRuns, pictureRows, type RunPos } from "../chatReceipt";
+import type { PersonPictureRef } from "./personPictures";
 
 // ─── What a chat is ───
 
@@ -104,14 +105,30 @@ export interface HomeChatFace {
   username: string;
   name: string;
   picture: string | null;
+  /** Their profile picture by rev (absent: the server doesn't say). */
+  pictureOf?: PersonPictureRef;
+}
+
+/** Who a person is for their profile picture (PersonAvatar `pictureOf`);
+ *  null when the server doesn't send `pictureRev` (older daemons). */
+export function pictureRefOf(
+  serverId: string | null | undefined,
+  p: { ext: string; username: string; pictureRev?: string | null } | null | undefined
+): PersonPictureRef | null {
+  if (!serverId || !p || !p.ext || p.pictureRev === undefined) return null;
+  return { serverId, ext: p.ext, username: p.username, rev: p.pictureRev };
 }
 
 /** A member's picture: their username (the colour), name (the initials)
- *  and picture; a member K2 doesn't list: "Someone" on their id's colour. */
-export function homeChatFace(people: HomeChatPeople | null | undefined, memberId: string): HomeChatFace {
+ *  and picture; a member K2 doesn't list: "Someone" on their id's colour.
+ *  With `serverId`, their profile picture's ref too. */
+export function homeChatFace(people: HomeChatPeople | null | undefined, memberId: string, serverId?: string): HomeChatFace {
   const p = personByMember(people, memberId);
   if (!p) return { username: memberId, name: "Someone", picture: null };
-  return { username: p.username, name: p.displayName || p.username, picture: p.picture ?? null };
+  const face: HomeChatFace = { username: p.username, name: p.displayName || p.username, picture: p.picture ?? null };
+  const ref = pictureRefOf(serverId, p);
+  if (ref) face.pictureOf = ref;
+  return face;
 }
 
 /** The person behind a member id (their colour comes from the username). */

@@ -52,7 +52,7 @@ const HomeChatSenderPicture = memo(function HomeChatSenderPicture({ face }: { fa
       data-lift-skip=""
       data-testid="home-chat-msg-picture"
     >
-      <PersonAvatar username={face.username} name={face.name} picture={face.picture} size={THREAD_PICTURE_PX} fontSize={12} glass />
+      <PersonAvatar username={face.username} name={face.name} picture={face.picture} pictureOf={face.pictureOf} size={THREAD_PICTURE_PX} fontSize={12} glass />
     </span>
   );
 });

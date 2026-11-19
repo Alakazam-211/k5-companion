@@ -37,6 +37,7 @@ import { WorkspaceAvatar } from "./WorkspaceAvatar";
 import { chatRowLook, type ChatHomeView, type ChatRowLook } from "./homeChat/chatRowLook";
 import { useHomeChatRowsStore, openHomeChatRow } from "./homeChat/homeChatRowsStore";
 import { ChannelAvatar, CallGlyph, PersonAvatar } from "./homeChat/HomeChatGlyphs";
+import { pictureRefOf } from "./homeChat/homeChatModel";
 import { confirmRemoveChatRow } from "./homeChat/HomeConfirmSheet";
 import { callPersonFromRow } from "./homeChat/openHomeChat";
 
@@ -485,7 +486,7 @@ export function HomeList({
 
   const chatAvatar = (v: ChatHomeView, look: ChatRowLook, size: number, fontSize: number) =>
     v.chat === "person" ? (
-      <PersonAvatar username={look.username} name={look.name} picture={look.person?.picture ?? null} size={size} fontSize={fontSize} glass testId="person-avatar" />
+      <PersonAvatar username={look.username} name={look.name} picture={look.person?.picture ?? null} pictureOf={pictureRefOf(look.serverId, look.person)} size={size} fontSize={fontSize} glass testId="person-avatar" />
     ) : (
       <ChannelAvatar inviteOnly={look.inviteOnly} size={size} glass testId="channel-avatar" />
     );

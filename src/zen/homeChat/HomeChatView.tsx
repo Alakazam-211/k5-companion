@@ -68,6 +68,7 @@ import {
   convKey,
   firstLine,
   homeChatFace,
+  pictureRefOf,
   homeChatRows,
   homeChatStashSource,
   memberNames,
@@ -671,12 +672,12 @@ export function HomeChatView({
     return (authorId: string): HomeChatFace => {
       let f = out.get(authorId);
       if (!f) {
-        f = homeChatFace(people, authorId);
+        f = homeChatFace(people, authorId, serverId);
         out.set(authorId, f);
       }
       return f;
     };
-  }, [people]);
+  }, [people, serverId]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
   // Messages that mention you: Sew's `mentions`, or `@<your username or
   // name>` in the words.
@@ -764,7 +765,7 @@ export function HomeChatView({
           >
             <span className="relative flex" style={{ zIndex: 2, filter: AVATAR_LIFT }} data-testid="home-chat-header-avatar">
               {dm ? (
-                <PersonAvatar username={person?.username || target.ext || title} name={title} picture={person?.picture ?? null} size={HEADER_AVATAR_PX} />
+                <PersonAvatar username={person?.username || target.ext || title} name={title} picture={person?.picture ?? null} pictureOf={pictureRefOf(serverId, person)} size={HEADER_AVATAR_PX} />
               ) : (
                 <ChannelAvatar inviteOnly={inviteOnly} size={HEADER_AVATAR_PX} />
               )}

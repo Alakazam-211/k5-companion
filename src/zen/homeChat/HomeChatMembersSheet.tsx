@@ -32,6 +32,7 @@ import {
   memberRoleLabel,
   membersSubline,
   pickablePerson,
+  pictureRefOf,
 } from "./homeChatModel";
 import { noteHomeChatGone, useHomeChatStore } from "./homeChatStore";
 import { ChannelGlyph, PersonAvatar } from "./HomeChatGlyphs";
@@ -90,6 +91,8 @@ export function HomeChatMembersSheet({
   };
   const usernameOf = (ext: string): string =>
     ext === meExt ? scope.username() || "you" : ext === "k2:owner" ? "owner" : (personOf(ext)?.username ?? ext);
+  // Your own picture (`me.pictureRev`; you aren't on your people list).
+  const myPictureRef = pictureRefOf(scope.id, people ? { ext: meExt, username: scope.username(), pictureRev: people.me.pictureRev } : null);
   const addable = (people?.people ?? []).filter((p) => pickablePerson(p, meExt) && !inChannel.has(p.ext));
 
   /** One change, then the sheet's facts again. */
@@ -258,7 +261,7 @@ export function HomeChatMembersSheet({
                   const notes = [role, p.ext === members.creator ? "Created it" : null, p.state === "pending_add" ? "Adding…" : null].filter(Boolean);
                   return (
                     <li key={p.ext} className={ROW} style={{ minHeight: 52, padding: "6px 4px" }} data-member={p.ext}>
-                      <PersonAvatar username={usernameOf(p.ext)} name={p.ext === meExt ? scope.username() || "You" : nameOf(p.ext)} picture={person?.picture ?? null} size={34} />
+                      <PersonAvatar username={usernameOf(p.ext)} name={p.ext === meExt ? scope.username() || "You" : nameOf(p.ext)} picture={person?.picture ?? null} pictureOf={p.ext === meExt ? myPictureRef : pictureRefOf(scope.id, person)} size={34} />
                       <span className="flex flex-col flex-1 min-w-0">
                         <span className="text-[16px] truncate">{nameOf(p.ext)}</span>
                         {notes.length ? (
@@ -334,7 +337,7 @@ export function HomeChatMembersSheet({
                               >
                                 {on ? <CheckIcon size={14} strokeWidth={3} /> : null}
                               </span>
-                              <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} size={30} />
+                              <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} pictureOf={pictureRefOf(scope.id, p)} size={30} />
                               <span className="flex-1 min-w-0 truncate text-[16px]">{p.displayName}</span>
                             </button>
                           </li>

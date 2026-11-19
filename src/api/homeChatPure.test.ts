@@ -136,6 +136,29 @@ describe("people and channels", () => {
     for (const j of JUNK) expect(parseHomeChatPeople(j)).toEqual({ me: { ext: "", memberId: null }, people: [] });
   });
 
+  it("people: pictureRev as sent (blank or mistyped reads null); absent on older daemons", () => {
+    const p = parseHomeChatPeople({
+      ok: true,
+      me: { ext: "k2:connect:abc", memberId: "5", pictureRev: "rev-me" },
+      people: [
+        { ext: "k2:owner", username: "owner", picture: null, pictureRev: " abc123 " },
+        { ext: "k2:connect:x", username: "sam", picture: null, pictureRev: null },
+        { ext: "k2:connect:y", username: "kai", pictureRev: "" },
+        { ext: "k2:connect:z", username: "lee", pictureRev: 7 },
+        { ext: "k2:connect:old", username: "old", picture: null },
+      ],
+    });
+    expect(p.me).toEqual({ ext: "k2:connect:abc", memberId: "5", pictureRev: "rev-me" });
+    expect(p.people.map((x) => x.pictureRev)).toEqual(["abc123", null, null, null, undefined]);
+    // Absent stays absent (not null): "the server doesn't say".
+    expect("pictureRev" in p.people[4]).toBe(false);
+    expect("pictureRev" in parseHomeChatPeople({ me: { ext: "k2:owner" } }).me).toBe(false);
+    expect(parseHomeChatPeople({ me: { ext: "k2:owner", pictureRev: null } }).me.pictureRev).toBeNull();
+    // A legacy data-URL picture still parses beside it.
+    const legacy = parseHomeChatPeople({ people: [{ ext: "k2:owner", username: "owner", picture: "data:image/png;base64,AA==", pictureRev: "r" }] });
+    expect(legacy.people[0].picture).toBe("data:image/png;base64,AA==");
+  });
+
   it("channels: inviteOnly as sent, else the inverse of open; next cursor", () => {
     const c = parseHomeChatChannels({
       ok: true,

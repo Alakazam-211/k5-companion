@@ -94,8 +94,10 @@
 //   - The sender's picture through the same Communication intent as agents
 //     (a channel as a group named "#channel"): the App Group avatar cache
 //     under `<subdomain>|person:<senderExt>` (the app fills it from the
-//     people list, lib/avatarCache.ts `queuePersonAvatars`), else their
-//     initials on their colour (the app's person palette, by name).
+//     people list's `pictureRev` pictures, zen/homeChat/personPictures.ts
+//     → lib/avatarCache.ts `queuePersonAvatars`, rev = pictureRev), else
+//     their initials on their colour (the app's person palette, by name).
+//     An empty `avatarRev` means no picture: initials, not the cache.
 //   - The phone's own "Show message previews" off: the server already sent
 //     the fixed body (New message / Mentioned you / …); the sealed `msg` is
 //     never put on the lock screen here. It isn't kept in K2PushInbox
@@ -468,7 +470,11 @@ final class NotificationService: UNNotificationServiceExtension {
     let member = string(info, "senderMemberId")
     let handle = !ext.isEmpty ? ext : "hc-member:" + member
 
-    let picture = ext.isEmpty ? nil : cachedAvatar(subdomain: string(info, "subdomain"), projectId: "person:" + ext)
+    // `avatarRev` "" (sent, empty): the sender has no picture now (K2 sends
+    // their picture's rev), so initials, never one they removed. A rev that
+    // differs from the cached one still uses the cache (stale beats initials).
+    let removed = info["avatarRev"] != nil && string(info, "avatarRev").isEmpty
+    let picture = ext.isEmpty || removed ? nil : cachedAvatar(subdomain: string(info, "subdomain"), projectId: "person:" + ext)
     let imageData = picture ?? initialsAvatar(title: name, colorHex: personColorHex(name))
     let image = imageData.map { INImage(imageData: $0) }
     let sender = INPerson(

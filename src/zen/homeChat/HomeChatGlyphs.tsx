@@ -8,6 +8,7 @@
 // a row's avatar the agent avatars' glass edge).
 
 import { personColor, personInitials, personInk } from "./homeChatModel";
+import { usePersonPicture, type PersonPictureRef } from "./personPictures";
 import "../workspaceAvatar.css";
 
 /** The agent avatars' glass edge (rim + top sheen), over the picture. */
@@ -19,6 +20,7 @@ export function PersonAvatar({
   username,
   name,
   picture = null,
+  pictureOf = null,
   size = 32,
   testId,
   fontSize,
@@ -28,7 +30,11 @@ export function PersonAvatar({
   username: string;
   /** Their shown name (the initials). */
   name: string;
+  /** A `data:image/…` picture the row already carries (legacy). */
   picture?: string | null;
+  /** Who they are on which server: their profile picture by `pictureRev`
+   *  (personPictures.ts), fetched when due. `picture` wins when set. */
+  pictureOf?: PersonPictureRef | null;
   size?: number;
   testId?: string;
   /** The initials' size (default: from `size`). */
@@ -36,12 +42,14 @@ export function PersonAvatar({
   /** The glass edge (Home rows, beside agent avatars). */
   glass?: boolean;
 }) {
+  const loaded = usePersonPicture(pictureOf);
+  const shown = picture || loaded;
   const color = personColor(username || name);
   return (
     <span
       aria-hidden
       data-testid={testId}
-      data-person-avatar={picture ? "picture" : "initials"}
+      data-person-avatar={shown ? "picture" : "initials"}
       data-person-color={color}
       className={`k2-avatar${glass && size <= 32 ? " k2-avatar-sm" : ""} flex items-center justify-center shrink-0 font-bold overflow-hidden`}
       style={{
@@ -56,8 +64,8 @@ export function PersonAvatar({
         zIndex: 0,
       }}
     >
-      {picture ? (
-        <img src={picture} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+      {shown ? (
+        <img src={shown} alt="" draggable={false} style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
         personInitials(name, size)
       )}

@@ -33,6 +33,7 @@ import { homeHasAddress, type Home, type HomeRow } from "../homes";
 import { savedServerForHost, serverDisplayName } from "../homeView";
 import { CheckIcon } from "../icons";
 import { ChannelAvatar, PersonAvatar } from "./HomeChatGlyphs";
+import { pictureRefOf } from "./homeChatModel";
 import { channelRow, chatRowParts, isPersonExt, matchesElsewhere, personDetail, personRow, canAddPerson, samePersonCopy } from "./homeChatRows";
 import {
   refreshChatChannels,
@@ -295,7 +296,7 @@ export function PeoplePanel({ home, servers, q, onAddRow }: ChatPanelProps) {
                 return (
                   <PickRow
                     key={p.ext}
-                    avatar={<PersonAvatar username={p.username} name={p.displayName} picture={p.picture} size={40} fontSize={15} glass />}
+                    avatar={<PersonAvatar username={p.username} name={p.displayName} picture={p.picture} pictureOf={pictureRefOf(server.id, p)} size={40} fontSize={15} glass />}
                     name={p.displayName}
                     detail={ready ? personDetail(p.username, p.role) : "Setting up…"}
                     taken={taken}
@@ -549,7 +550,7 @@ export function NewChannelForm({
                   >
                     {on ? <CheckIcon size={14} strokeWidth={3} /> : null}
                   </span>
-                  <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} size={32} fontSize={12} />
+                  <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} pictureOf={pictureRefOf(server?.id, p)} size={32} fontSize={12} />
                   <span className="flex-1 min-w-0 truncate text-[16px]">{p.displayName}</span>
                 </button>
               );

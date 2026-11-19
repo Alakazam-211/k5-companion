@@ -21,7 +21,10 @@ import {
   iconRevFallback,
   isCacheableIcon,
   missingAvatarSources,
+  personAvatarItems,
+  personAvatarKey,
   queueAvatar,
+  queuePersonAvatars,
   queueServerAvatars,
   subdomainOfServerUrl,
   type AvatarItem,
@@ -301,5 +304,39 @@ describe("pictures that are not data: URLs", () => {
     install({ fillIn });
     queueServerAvatars("lan", rows({ id: "c" }));
     expect(fillIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Home chat people (person:<ext>)", () => {
+  it("the key is <subdomain>|person:<ext>, lowercased", () => {
+    expect(personAvatarKey("Riley", " k2:connect:ABC ")).toBe("riley|person:k2:connect:abc");
+  });
+
+  it("the rev is K2's pictureRev when sent, else the picture's hash", () => {
+    const items = personAvatarItems("riley", [
+      { ext: "k2:owner", picture: JPG, pictureRev: " h-owner-1 " },
+      { ext: "k2:connect:a", picture: PNG },
+      { ext: "k2:connect:b", picture: PNG, pictureRev: null },
+      { ext: "k2:connect:none", picture: null, pictureRev: "r" },
+      { ext: " ", picture: PNG, pictureRev: "r" },
+    ]);
+    expect(items).toEqual([
+      { key: "riley|person:k2:owner", rev: "h-owner-1", dataUrl: JPG },
+      { key: "riley|person:k2:connect:a", rev: iconRevFallback(PNG), dataUrl: PNG },
+      { key: "riley|person:k2:connect:b", rev: iconRevFallback(PNG), dataUrl: PNG },
+    ]);
+  });
+
+  it("a new pictureRev is sent again; the same one is not", async () => {
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: JPG, pictureRev: "r1" }]);
+    await tick();
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: JPG, pictureRev: "r1" }]);
+    await tick();
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: PNG, pictureRev: "r2" }]);
+    await tick();
+    expect(calls).toEqual([
+      [{ key: "riley|person:k2:owner", rev: "r1", dataUrl: JPG }],
+      [{ key: "riley|person:k2:owner", rev: "r2", dataUrl: PNG }],
+    ]);
   });
 });

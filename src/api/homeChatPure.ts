@@ -175,6 +175,11 @@ export interface HomeChatPerson {
   displayName: string;
   /** A `data:image/…` URL, else null (always null from 0.46.13). */
   picture: string | null;
+  /** K2 0.46.16+ (`f988f071ac`): their profile picture's rev (its hash,
+   *  `imageHash` of `GET /cli/people/picture?person=<username>`); null:
+   *  they have none. Absent (undefined): the server doesn't say (older
+   *  daemons), so the phone never asks for a picture. */
+  pictureRev?: string | null;
   /** Present only for an Owner or Admin caller. */
   role: HomeChatRole | (string & {}) | null;
   /** False: "Setting up…", and they can't be picked. */
@@ -184,7 +189,8 @@ export interface HomeChatPerson {
 }
 
 export interface HomeChatPeople {
-  me: { ext: string; memberId: string | null };
+  /** `pictureRev` as on a person row (absent: the server doesn't say). */
+  me: { ext: string; memberId: string | null; pictureRev?: string | null };
   people: HomeChatPerson[];
 }
 
@@ -201,14 +207,23 @@ export function parseHomeChatPerson(v: unknown): HomeChatPerson | null {
     role: strOrNull(r.role),
     ready: r.ready === true,
     memberId: idOf(r.memberId),
+    ...pictureRevOf(r),
   };
+}
+
+/** `{pictureRev}` when the row carries the field (a non-blank string, else
+ *  null), `{}` when it doesn't (an older daemon: no pictures to ask for). */
+export function pictureRevOf(r: Record<string, unknown>): { pictureRev?: string | null } {
+  if (!("pictureRev" in r)) return {};
+  const v = r.pictureRev;
+  return { pictureRev: typeof v === "string" && v.trim() ? v.trim() : null };
 }
 
 export function parseHomeChatPeople(v: unknown): HomeChatPeople {
   const o = obj(v) ?? {};
   const me = obj(o.me) ?? {};
   return {
-    me: { ext: str(me.ext), memberId: idOf(me.memberId) },
+    me: { ext: str(me.ext), memberId: idOf(me.memberId), ...pictureRevOf(me) },
     people: arr(o.people)
       .map(parseHomeChatPerson)
       .filter((p): p is HomeChatPerson => p !== null),
