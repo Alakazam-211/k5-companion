@@ -24,6 +24,14 @@ import { parseCallSummary, type HomeChatCallSummary } from "./homeChatCallsPure"
  *  switch is on, the server is Linux, Sew runs and the K5 Space is ready. */
 export const HOME_CHAT_FEATURE = "home-chat-v1" as const;
 
+/** K2 0.46.16 (`homeChatPush` owner switch): phone pushes for Home chat.
+ *  `/cli/home-chat/notify` (+ `/set`), `/cli/home-chat/push-prefs` (+
+ *  `/set`), the `{"t":"viewing"}` lease frames the phone sends on the events
+ *  socket, and the daemon's `notify` frame. Listed only while the owner's
+ *  switch is on and Home chat runs. The channel's notify setting, the
+ *  "Show chat message text" row and the viewing lease run only then. */
+export const HOME_CHAT_PUSH_FEATURE = "home-chat-push-v1" as const;
+
 // ─── Small readers ───
 
 export function idOf(v: unknown): string | null {
@@ -459,6 +467,58 @@ export interface HomeChatMessage {
   nonce: string | null;
   /** A DM call's record: drawn as a line, not a bubble. */
   call: HomeChatCallSummary | null;
+  /** Who it mentions (Sew's `mentions`); null/absent when it says none. */
+  mentions?: HomeChatMentions | null;
+}
+
+/** Sew's `message.mentions`: member ids, and `@channel` / `@here`. */
+export interface HomeChatMentions {
+  members: string[];
+  channel: boolean;
+  here: boolean;
+}
+
+export function parseHomeChatMentions(v: unknown): HomeChatMentions | null {
+  const o = obj(v);
+  if (!o) return null;
+  const members = arr(o.members)
+    .map(idOf)
+    .filter((x): x is string => x !== null);
+  const channel = o.channel === true;
+  const here = o.here === true;
+  if (members.length === 0 && !channel && !here) return null;
+  return { members, channel, here };
+}
+
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Does `text` say `@name` for one of `names` (case-insensitive; the name
+ *  ends at a space, punctuation or the end, so `@ann` is not `@anna`)? */
+export function textMentions(text: string, names: readonly string[]): boolean {
+  if (!text || !text.includes("@")) return false;
+  for (const raw of names) {
+    const n = raw.trim();
+    if (!n) continue;
+    const re = new RegExp(`(^|[^\\w@])@${escapeRe(n)}(?![\\w-])`, "i");
+    if (re.test(text)) return true;
+  }
+  return false;
+}
+
+/** Does `m` mention the viewer? Sew's `mentions` (their member id, or
+ *  `@channel` / `@here`), or `@<their username or name>` in the words.
+ *  Never their own message, never a deleted one. */
+export function homeChatMentionsMe(
+  m: Pick<HomeChatMessage, "authorId" | "body" | "deleted" | "mentions">,
+  me: { memberId: string | null; names: readonly string[] }
+): boolean {
+  if (m.deleted) return false;
+  if (me.memberId && m.authorId === me.memberId) return false;
+  const x = m.mentions;
+  if (x && (x.channel || x.here || (!!me.memberId && x.members.includes(me.memberId)))) return true;
+  return textMentions(m.body, me.names);
 }
 
 export function parseHomeChatReaction(v: unknown): HomeChatReaction | null {
@@ -481,6 +541,7 @@ export function parseHomeChatMessage(v: unknown): HomeChatMessage | null {
   const ref = obj(m.reference);
   const deleted = m.deleted_at !== undefined && m.deleted_at !== null;
   const editedAtMs = msOf(m.edited_at);
+  const mentions = deleted ? null : parseHomeChatMentions(m.mentions);
   return {
     id,
     conv,
@@ -499,6 +560,8 @@ export function parseHomeChatMessage(v: unknown): HomeChatMessage | null {
     deleted,
     nonce: strOrNull(m.nonce),
     call: m.call ? parseCallSummary(m.call) : null,
+    // Only when Sew named someone (absent otherwise).
+    ...(mentions ? { mentions } : {}),
   };
 }
 
@@ -668,6 +731,8 @@ const CODE_KIND: Record<string, HomeChatRefusalKind> = {
   // `/cli/home-chat/dm` and send again once).
   conversation_gone: "not_found",
   channel_open: "conflict",
+  // 0.46.16: a notify level set on a DM (DMs always notify).
+  dm_always_notifies: "conflict",
   channel_archived: "conflict",
   room_full: "conflict",
   room_closing: "conflict",
@@ -768,4 +833,124 @@ export function parseHomeChatRefusal(status: number, text: string): HomeChatRefu
  *  retry) is `retry`, which never closes it. */
 export function refusalClosesGate(r: HomeChatRefusal): boolean {
   return r.kind === "off" || r.kind === "unavailable";
+}
+
+// ─── Pushes (K2 0.46.16, `home-chat-push-v1`) ───
+
+/** A conversation's push level. `none` is only ever set elsewhere (Sew's
+ *  own client): the phone offers two. */
+export type HomeChatNotifyLevel = "all" | "mentions" | "none";
+/** What the phone may set: All messages or @mentions only. */
+export type HomeChatNotifyChoice = "all" | "mentions";
+
+/** `GET /cli/home-chat/notify?conv=` (and the answer to `notify/set`). */
+export interface HomeChatNotify {
+  conv: string;
+  convKind: "dm" | "channel";
+  /** Its own level, or the one in effect when it inherits. */
+  level: HomeChatNotifyLevel;
+  effective: HomeChatNotifyLevel;
+  /** No level of its own: the Space's (or the server's) default. */
+  inherited: boolean;
+  /** A DM: it always notifies, nothing to pick. */
+  fixed: boolean;
+  muted: boolean;
+  /** False until this server's chat can push every message: All messages
+   *  reaches the phone as @mentions until then. */
+  allMessagesLive: boolean;
+}
+
+/** The `notify` frame (a level changed on any of your devices). */
+export interface HomeChatNotifyFrame {
+  conv: string;
+  level: HomeChatNotifyLevel | null;
+  effective: HomeChatNotifyLevel | null;
+  inherited: boolean;
+  muted: boolean;
+}
+
+/** `GET /cli/home-chat/push-prefs`: this person's Home chat push choices. */
+export interface HomeChatPushPrefs {
+  /** The owner's switch, your bell and a phone of yours, all on. */
+  on: boolean;
+  /** Show message text on the phone. */
+  previews: boolean;
+  /** Also notify for agents' posts. */
+  agents: boolean;
+  /** The owner lets message text reach phones on this server. */
+  serverPreviews: boolean;
+  bell: boolean;
+  /** Your registered phones there. */
+  devices: number;
+  allMessagesLive: boolean;
+}
+
+export function parseHomeChatNotifyLevel(v: unknown): HomeChatNotifyLevel | null {
+  return v === "all" || v === "mentions" || v === "none" ? v : null;
+}
+
+/** A `notify` answer; null without a conversation or a level (the setting
+ *  never shows a guess). */
+export function parseHomeChatNotify(v: unknown): HomeChatNotify | null {
+  const o = obj(v);
+  const conv = o ? idOf(o.conv) : null;
+  const level = o ? parseHomeChatNotifyLevel(o.level) : null;
+  if (!o || !conv || !level) return null;
+  return {
+    conv,
+    convKind: o.convKind === "dm" ? "dm" : "channel",
+    level,
+    effective: parseHomeChatNotifyLevel(o.effective) ?? level,
+    inherited: o.inherited === true,
+    fixed: o.fixed === true,
+    muted: o.muted === true,
+    allMessagesLive: o.allMessagesLive === true,
+  };
+}
+
+export function parseHomeChatNotifyFrame(v: Record<string, unknown>): HomeChatNotifyFrame | null {
+  const conv = idOf(v.conv);
+  if (!conv) return null;
+  return {
+    conv,
+    level: parseHomeChatNotifyLevel(v.level),
+    effective: parseHomeChatNotifyLevel(v.effective),
+    inherited: v.inherited === true,
+    muted: v.muted === true,
+  };
+}
+
+/** A frame over what the phone held (the frame carries no `fixed` /
+ *  `allMessagesLive`: those stay). Null when the frame names no level and
+ *  nothing was held: read the route again. */
+export function applyHomeChatNotifyFrame(
+  held: HomeChatNotify | null | undefined,
+  f: HomeChatNotifyFrame
+): HomeChatNotify | null {
+  const level = f.level ?? f.effective;
+  if (!level) return null;
+  return {
+    conv: f.conv,
+    convKind: held?.convKind ?? "channel",
+    level,
+    effective: f.effective ?? level,
+    inherited: f.inherited,
+    fixed: held?.fixed ?? false,
+    muted: f.muted,
+    allMessagesLive: held?.allMessagesLive ?? false,
+  };
+}
+
+export function parseHomeChatPushPrefs(v: unknown): HomeChatPushPrefs | null {
+  const o = obj(v);
+  if (!o || typeof o.previews !== "boolean") return null;
+  return {
+    on: o.on === true,
+    previews: o.previews === true,
+    agents: o.agents === true,
+    serverPreviews: o.serverPreviews === true,
+    bell: o.bell === true,
+    devices: typeof o.devices === "number" && Number.isFinite(o.devices) ? Math.max(0, Math.floor(o.devices)) : 0,
+    allMessagesLive: o.allMessagesLive === true,
+  };
 }

@@ -211,13 +211,28 @@ describe("the shared socket", () => {
     last().openNow();
     const links: HomeChatLinkInfo[] = [];
     const un2 = subscribeHomeChat(s, () => {}, { onLink: (i) => links.push(i) });
-    expect(links).toEqual([{ up: true, reopened: false }]);
+    expect(links).toEqual([{ up: true, reopened: false, send: expect.any(Function) }]);
     last().frame({ type: "hello", chat: "live", flags: { httpTyping: true }, calls: [] });
     expect(noteLinkMock).toHaveBeenCalledWith(s, expect.objectContaining({ chat: "live", flags: expect.objectContaining({ httpTyping: true }) }));
     last().frame({ type: "status", chat: "unavailable" });
     expect(noteLinkMock).toHaveBeenLastCalledWith(s, { chat: "unavailable" });
     un1();
     un2();
+  });
+
+  it("the link hands over a send that writes on the open socket only (the viewing lease)", () => {
+    const s = fakeScope({ id: "a" });
+    const sendSpy = vi.spyOn(MockWS.prototype, "send");
+    const links: HomeChatLinkInfo[] = [];
+    const un = subscribeHomeChat(s, () => {}, { onLink: (i) => links.push(i) });
+    last().openNow();
+    const send = links[0].send!;
+    expect(send('{"t":"viewing","conv":"9","visible":true}')).toBe(true);
+    expect(sendSpy).toHaveBeenCalledWith('{"t":"viewing","conv":"9","visible":true}');
+    last().drop(1006);
+    expect(send("x")).toBe(false);
+    expect(sendSpy).toHaveBeenCalledTimes(1);
+    un();
   });
 
   it("a drop reconnects 2 s, 5 s, 15 s, 30 s; the reopen says so", async () => {
@@ -227,7 +242,7 @@ describe("the shared socket", () => {
     last().openNow();
     last().drop(1006);
     expect(links).toEqual([
-      { up: true, reopened: false },
+      { up: true, reopened: false, send: expect.any(Function) },
       { up: false, reopened: false },
     ]);
     for (const pause of [2_000, 5_000, 15_000, 30_000, 30_000]) {

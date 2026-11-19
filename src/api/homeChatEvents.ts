@@ -11,8 +11,13 @@
 //   - Frames: `hello` first (chat, flags, the calls already ringing), then
 //     `message`, `message_updated`, `deleted`, `read`, `reaction`, `typing`,
 //     `member_removed`, `summary_changed` (also when the socket fell
-//     behind), `status`, `call_ring`, `call_updated`. Unknown frames are
-//     dropped.
+//     behind), `status`, `call_ring`, `call_updated`, and (K2 0.46.16
+//     `home-chat-push-v1`) `notify {conv, level, effective, inherited,
+//     muted}` when this person's push level changed on any device. Unknown
+//     frames are dropped.
+//   - The one thing the phone sends up (0.46.16): the viewing lease,
+//     `{"t":"viewing","conv","visible"}` (api/homeChatViewing.ts), through
+//     the `send` that `onLink` hands over while the socket is open.
 //   - Pings every 25 s (the platform answers). A removed, disabled or
 //     signed-out login closes with 4003.
 //
@@ -40,9 +45,11 @@ import {
   obj,
   parseHomeChatFlags,
   parseHomeChatMessage,
+  parseHomeChatNotifyFrame,
   strOrNull,
   type HomeChatFlags,
   type HomeChatMessage,
+  type HomeChatNotifyFrame,
 } from "./homeChatPure";
 import { parseCall, parseHelloCall, parseRing, type HomeChatCall, type HomeChatRing } from "./homeChatCallsPure";
 import { noteHomeChatLink, onHomeChatGate, refreshHomeChatGate } from "./homeChat";
@@ -90,7 +97,8 @@ export type HomeChatFrame =
   | { type: "member_removed"; conv: string }
   | { type: "summary_changed"; conv: string | null }
   | { type: "call_ring"; conv: string; ring: HomeChatRing }
-  | { type: "call_updated"; conv: string; call: HomeChatCall };
+  | { type: "call_updated"; conv: string; call: HomeChatCall }
+  | ({ type: "notify" } & HomeChatNotifyFrame);
 
 /** A reaction frame's emoji: Sew's `{kind: "unicode", value}`, or a string. */
 function emojiOf(v: unknown): string | null {
@@ -164,6 +172,10 @@ export function parseHomeChatFrame(data: unknown): HomeChatFrame | null {
       const call = parseCall(v.d);
       return call ? { type: "call_updated", conv: conv ?? call.conv, call } : null;
     }
+    case "notify": {
+      const n = parseHomeChatNotifyFrame(v);
+      return n ? { type: "notify", ...n } : null;
+    }
     default:
       return null;
   }
@@ -185,12 +197,18 @@ export function homeChatRetryMs(attempt: number): number {
 
 // ─── The shared socket per server ───
 
+/** Sends one text frame on the server's open socket; false when none is. */
+export type HomeChatEventsSend = (text: string) => boolean;
+
 export interface HomeChatLinkInfo {
   /** The socket is open. */
   up: boolean;
   /** It opened again after a drop: frames may be missing (re-read the
    *  summary and the open chat; `hello` follows). */
   reopened: boolean;
+  /** While up: write a text frame on this server's socket (and on the next
+   *  one after a drop). The viewing lease's only way up. */
+  send?: HomeChatEventsSend;
 }
 
 interface Sub {
@@ -217,7 +235,11 @@ interface Hub {
   stopped: boolean;
   checking: boolean;
   unhook: Array<() => void>;
+  send: HomeChatEventsSend;
 }
+
+/** A WebSocket's OPEN readyState (no global needed under test). */
+const WS_OPEN = 1;
 
 const hubs = new Map<string, Hub>();
 
@@ -234,7 +256,7 @@ function tell(hub: Hub, info: HomeChatLinkInfo): void {
 function setUp(hub: Hub, up: boolean, reopened = false): void {
   if (hub.up === up) return;
   hub.up = up;
-  tell(hub, { up, reopened });
+  tell(hub, up ? { up, reopened, send: hub.send } : { up, reopened });
 }
 
 function quiet(sock: WebSocket | null): void {
@@ -429,6 +451,16 @@ function makeHub(scope: ServerScope): Hub {
     stopped: false,
     checking: false,
     unhook: [],
+    send: (text) => {
+      const s = hub.ws;
+      if (hub.stopped || !s || !hub.up || s.readyState !== WS_OPEN) return false;
+      try {
+        s.send(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
   hub.unhook.push(
     onAppLifecycle((phase) => {
@@ -474,7 +506,7 @@ export function subscribeHomeChat(
   hub.subs.add(sub);
   if (hub.up) {
     try {
-      sub.onLink?.({ up: true, reopened: false });
+      sub.onLink?.({ up: true, reopened: false, send: hub.send });
     } catch {
       /* */
     }
