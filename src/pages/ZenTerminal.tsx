@@ -54,6 +54,7 @@ import { ZEN_SERVER_PARAM, resolveServerRef, withServerParam } from "../zen/room
 import { PencilIcon } from "../zen/icons";
 import { useBackHandler } from "../lib/androidBack";
 import { useSwipeBack } from "../lib/useSwipeBack";
+import { useThemeStore } from "../theme/themeStore";
 import { EDGE_ARM_PX } from "../lib/swipeBack";
 
 const DEV_MODE: boolean = import.meta.env?.DEV ?? false;
@@ -78,6 +79,9 @@ export const ZEN_TERMINAL_HEADER_PX = 46;
  *  thread, never /sessions. No thread toggle here by design. */
 export function ZenTerminal() {
   const { terminalId } = useParams<{ terminalId: string }>();
+  // The terminal is always dark (Riley 2026-11-19): Obsidian or Dusk,
+  // even with Veil on screen, while this page is open.
+  useEffect(() => useThemeStore.getState().holdDark(), []);
   const navigate = useNavigate();
   const location = useLocation();
   const [search] = useSearchParams();
