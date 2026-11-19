@@ -27,7 +27,7 @@ export function folderLine(id: string, hint: string | null | undefined, workspac
 const GLASS_BTN = {
   width: 34,
   height: 34,
-  color: "#fff",
+  color: "var(--color-text-primary)",
 } as const;
 
 /** Full-screen file viewer: name top-left, glass ✕ top-right, the file
@@ -123,7 +123,7 @@ export function FileViewer() {
           <button
             type="button"
             className="shrink-0 px-3 text-[13px] zen-glass zen-glass-pill"
-            style={{ height: 34, color: "#fff" }}
+            style={{ height: 34, color: "var(--color-text-primary)" }}
             onClick={() => setSource((v) => !v)}
             aria-pressed={source}
             data-testid="file-viewer-source"

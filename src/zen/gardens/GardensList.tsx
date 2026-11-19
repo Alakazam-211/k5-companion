@@ -88,7 +88,7 @@ export function GardensList({
           <button
             type="button"
             className="w-full text-left text-[17px] font-semibold"
-            style={{ padding: "16px 20px", color: "#fff" }}
+            style={{ padding: "16px 20px", color: "var(--color-text-primary)" }}
             data-testid="gardens-row"
             onClick={() => onOpen(g.id)}
           >

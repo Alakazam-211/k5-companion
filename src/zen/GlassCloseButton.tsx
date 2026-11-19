@@ -15,7 +15,7 @@ export function GlassCloseButton({
       type="button"
       onClick={onClick}
       className="flex items-center justify-center shrink-0"
-      style={{ width: 44, height: 44, marginLeft: -6, marginRight: -6, color: "#fff" }}
+      style={{ width: 44, height: 44, marginLeft: -6, marginRight: -6, color: "var(--color-text-primary)" }}
       aria-label={label}
       data-testid={testId}
     >
