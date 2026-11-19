@@ -39,9 +39,11 @@ export function parseError(text: string): ParsedError {
 }
 
 /** A refusal that means "do this in K2's own form first" (e.g.
- *  `git_access_setup_form_first`): Allow can't work from here yet. */
+ *  `git_access_setup_form_first`, or a Postal pairing that wants the other
+ *  side's code typed in K2's form, `postal_code_needed`): Allow can't work
+ *  from here yet. */
 export function isFormFirstCode(code: string): boolean {
-  return /_form_first$/.test(code);
+  return /_form_first$/.test(code) || code === "postal_code_needed";
 }
 
 /** What a person reads for a refused write. */

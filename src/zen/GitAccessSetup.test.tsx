@@ -107,10 +107,14 @@ describe("which cards need a form", () => {
     expect(cardForm({ action: "compute.git-access-setup", form: null })).toBe("git-access-setup");
     expect(cardForm({ action: "anything", form: "git-access-setup" })).toBe("git-access-setup");
     expect(cardForm({ action: "compute.git-access-setup", form: "site-pin" })).toBe("elsewhere");
+    // K2 0.46.17's ids: git-access-setup (drawn here), publish-pin (not).
+    expect(cardForm({ action: "publish.pin", form: "publish-pin" })).toBe("elsewhere");
+    expect(cardForm({ action: "postal.pair.accept", form: null })).toBe(null);
     expect(cardForm({ action: "publish.pin", form: null })).toBe("elsewhere");
     expect(cardForm({ action: "compute.use", form: null })).toBeNull();
     expect(isFormFirstCode("git_access_setup_form_first")).toBe(true);
     expect(isFormFirstCode("pin_form_first")).toBe(true);
+    expect(isFormFirstCode("postal_code_needed")).toBe(true);
     expect(isFormFirstCode("form_firstly")).toBe(false);
   });
 
