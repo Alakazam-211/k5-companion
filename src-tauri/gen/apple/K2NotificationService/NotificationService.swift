@@ -76,6 +76,32 @@
 // notification of the same call (matched by `callId` in the delivered,
 // unsealed userInfo). One ring, then exactly one silent replacement.
 // KEEP THE CATEGORY IDS IN SYNC with K2CallPush.swift.
+//
+// Home chat (K2 0.46.16 push kind `home_chat`, sealed only): the title (the
+// sender for a DM, "#channel · sender" for a channel) and body come from
+// the plaintext; `data` carries conversationId, convKind (dm|channel),
+// messageId, senderExt, senderName, channelName, homeUnread and passive.
+//   - Group: `hc:<server>:<conversationId>`, the server being the push's
+//     badgeKey, else the saved server that opened it, else its label, else
+//     its instanceId (src/lib/homeChatPush.ts `homeChatThreadId` keeps the
+//     same rule, tested). Never the instance id first: a daemon mints a new
+//     one on every start.
+//   - No collapse id: before it is shown, the conversation's other
+//     delivered notifications from the same server go (one banner per
+//     chat, like a call's).
+//   - `passive` "1" (an old message's quiet summary): no sound (the relay
+//     gives every sealed push the default sound) and the passive level.
+//   - The sender's picture through the same Communication intent as agents
+//     (a channel as a group named "#channel"): the App Group avatar cache
+//     under `<subdomain>|person:<senderExt>` (the app fills it from the
+//     people list, lib/avatarCache.ts `queuePersonAvatars`), else their
+//     initials on their colour (the app's person palette, by name).
+//   - The phone's own "Show message previews" off: the server already sent
+//     the fixed body (New message / Mentioned you / …); the sealed `msg` is
+//     never put on the lock screen here. It isn't kept in K2PushInbox
+//     either: that inbox is the Thread cache's (an `addr` per entry).
+//   - The generic lane (`K2` / `New message`, no conversation): as sent,
+//     quiet when passive.
 
 import Intents
 import UIKit
@@ -116,8 +142,11 @@ final class NotificationService: UNNotificationServiceExtension {
       m.userInfo = u.userInfo
       incoming = m
       sealed = true
-      // The message itself, for the app to show on open (K2PushInbox).
-      if let msg = u.msg, let e = K2PushInbox.entry(msg: msg, userInfo: u.userInfo) {
+      // The message itself, for the app to show on open (K2PushInbox). A
+      // Thread's only: Home chat has no cache it could land in.
+      if (u.userInfo["kind"] as? String) != "home_chat", let msg = u.msg,
+        let e = K2PushInbox.entry(msg: msg, userInfo: u.userInfo)
+      {
         K2PushInbox.append(e)
       }
     } else if K2PushSealed.enforced(incoming.userInfo),
@@ -137,6 +166,39 @@ final class NotificationService: UNNotificationServiceExtension {
       lock.unlock()
       Self.clearOtherCallNotifications(call, keeping: request.identifier) {
         self.deliver(call)
+      }
+      return
+    }
+
+    // A Home chat message: its own group, the banner it replaces, quiet
+    // when passive, the sender's picture.
+    if let hc = Self.homeChatContent(incoming) {
+      let badge = Self.applyBadgeTotals(hc.userInfo)
+      let base = Self.withBadge(hc, badge)
+      lock.lock()
+      self.contentHandler = contentHandler
+      self.original = base
+      lock.unlock()
+      Self.clearReplacedHomeChat(hc, keeping: request.identifier) {
+        guard let built = Self.homeChatIntent(for: hc, sealed: sealed) else {
+          self.deliver(base)
+          return
+        }
+        let updated: UNNotificationContent
+        do {
+          updated = Self.homeChatQuiet(Self.withBadge(try hc.updating(from: built), badge))
+        } catch {
+          self.deliver(base)
+          return
+        }
+        self.lock.lock()
+        self.bestAttempt = updated
+        self.lock.unlock()
+        let interaction = INInteraction(intent: built, response: nil)
+        interaction.direction = .incoming
+        interaction.donate { [weak self] _ in
+          self?.deliver(updated)
+        }
       }
       return
     }
@@ -302,6 +364,164 @@ final class NotificationService: UNNotificationServiceExtension {
       if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
       done()
     }
+  }
+
+  // ── Home chat (K2 0.46.16) ──────────────────────────────────────────
+
+  static let homeChatKind = "home_chat"
+
+  /// A Home chat push's shape (nil: not one): its group, and quiet when
+  /// passive. The server's title and body stand.
+  static func homeChatContent(_ content: UNNotificationContent) -> UNMutableNotificationContent? {
+    let info = content.userInfo
+    guard string(info, "kind") == homeChatKind,
+      let m = content.mutableCopy() as? UNMutableNotificationContent
+    else { return nil }
+    if let thread = homeChatThreadId(info) { m.threadIdentifier = thread }
+    if m.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { m.title = "K2" }
+    if m.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { m.body = "New message" }
+    if string(info, "passive") == "1" {
+      m.sound = nil
+      m.interruptionLevel = .passive
+    }
+    return m
+  }
+
+  /// `content` again with a passive push's quiet kept (after the intent's
+  /// update, which builds new content).
+  static func homeChatQuiet(_ content: UNNotificationContent) -> UNNotificationContent {
+    guard string(content.userInfo, "passive") == "1",
+      let m = content.mutableCopy() as? UNMutableNotificationContent
+    else { return content }
+    m.sound = nil
+    m.interruptionLevel = .passive
+    return m
+  }
+
+  /// The server part of the group: badgeKey (stable per person per
+  /// server), else the saved server that opened it, else the tunnel label,
+  /// else the instance id. KEEP IN SYNC with src/lib/homeChatPush.ts.
+  static func homeChatServerKey(_ info: [AnyHashable: Any]) -> String? {
+    let badgeKey = string(info, "badgeKey")
+    if !badgeKey.isEmpty { return badgeKey }
+    let saved = string(info, "k2ServerId")
+    if !saved.isEmpty { return saved }
+    let sub = string(info, "subdomain").lowercased()
+    if !sub.isEmpty { return sub }
+    let iid = string(info, "instanceId")
+    return iid.isEmpty ? nil : iid
+  }
+
+  /// `hc:<server>:<conversationId>`; nil for the generic lane.
+  static func homeChatThreadId(_ info: [AnyHashable: Any]) -> String? {
+    let conv = string(info, "conversationId")
+    guard !conv.isEmpty, let server = homeChatServerKey(info) else { return nil }
+    return "hc:\(server):\(conv)"
+  }
+
+  /// Two notifications from the same server and login: the first key both
+  /// carry decides (K2DeliveredClear.serverMatches, plus the saved server).
+  static func sameHomeChatServer(_ a: [AnyHashable: Any], _ b: [AnyHashable: Any]) -> Bool {
+    for key in ["badgeKey", "k2ServerId", "subdomain", "instanceId"] {
+      let x = string(a, key).lowercased()
+      let y = string(b, key).lowercased()
+      if !x.isEmpty && !y.isEmpty { return x == y }
+    }
+    return false
+  }
+
+  /// The banner this push replaces: the same conversation's other delivered
+  /// notifications from the same server go first. `done` runs once.
+  static func clearReplacedHomeChat(
+    _ content: UNNotificationContent, keeping identifier: String, done: @escaping () -> Void
+  ) {
+    let info = content.userInfo
+    let conv = string(info, "conversationId")
+    guard !conv.isEmpty else {
+      done()
+      return
+    }
+    let center = UNUserNotificationCenter.current()
+    center.getDeliveredNotifications { delivered in
+      let ids = delivered
+        .filter {
+          let other = $0.request.content.userInfo
+          return $0.request.identifier != identifier && string(other, "kind") == homeChatKind
+            && string(other, "conversationId") == conv && sameHomeChatServer(info, other)
+        }
+        .map { $0.request.identifier }
+      if !ids.isEmpty { center.removeDeliveredNotifications(withIdentifiers: ids) }
+      done()
+    }
+  }
+
+  /// The sender as a Communication notification (nil: leave it plain). A
+  /// DM: the sender; a channel: the sender, in a group named "#channel".
+  static func homeChatIntent(for content: UNNotificationContent, sealed: Bool) -> INSendMessageIntent? {
+    let info = content.userInfo
+    guard let conversation = homeChatThreadId(info) else { return nil }
+    var name = string(info, "senderName")
+    let dm = string(info, "convKind") == "dm"
+    if name.isEmpty && dm { name = content.title.trimmingCharacters(in: .whitespacesAndNewlines) }
+    guard !name.isEmpty else { return nil }
+    let ext = string(info, "senderExt")
+    let member = string(info, "senderMemberId")
+    let handle = !ext.isEmpty ? ext : "hc-member:" + member
+
+    let picture = ext.isEmpty ? nil : cachedAvatar(subdomain: string(info, "subdomain"), projectId: "person:" + ext)
+    let imageData = picture ?? initialsAvatar(title: name, colorHex: personColorHex(name))
+    let image = imageData.map { INImage(imageData: $0) }
+    let sender = INPerson(
+      personHandle: INPersonHandle(value: handle, type: .unknown),
+      nameComponents: nil,
+      displayName: name,
+      image: image,
+      contactIdentifier: nil,
+      customIdentifier: handle)
+
+    var recipients: [INPerson]? = nil
+    var group: INSpeakableString? = nil
+    let channelName = string(info, "channelName")
+    if !dm && !channelName.isEmpty {
+      // A group needs more than one other party: you and the sender.
+      let me = INPerson(
+        personHandle: INPersonHandle(value: "k2:me", type: .unknown),
+        nameComponents: nil,
+        displayName: nil,
+        image: nil,
+        contactIdentifier: nil,
+        customIdentifier: nil,
+        isMe: true)
+      recipients = [me, sender]
+      group = INSpeakableString(spokenPhrase: "#" + channelName)
+    }
+
+    let intent = INSendMessageIntent(
+      recipients: recipients,
+      outgoingMessageType: .outgoingMessageText,
+      // Sealed: the decrypted text is shown, never donated (prd V28).
+      content: sealed ? nil : content.body,
+      speakableGroupName: group,
+      conversationIdentifier: conversation,
+      serviceName: nil,
+      sender: sender,
+      attachments: nil)
+    if let image = image {
+      intent.setImage(image, forParameterNamed: \.sender)
+    }
+    return intent
+  }
+
+  /// The app's person colours (homeChatModel.ts `PERSON_COLORS`, the
+  /// daemon's palette), picked by the same string hash. The app hashes the
+  /// username; a push carries only the name, so a DM's initials may sit on
+  /// another of the eight colours than in the app.
+  static let personColors = ["#3a9e96", "#3a87a8", "#6a6fc8", "#8c62c4", "#b25cb0", "#c45a86", "#9b7a95", "#64778f"]
+
+  static func personColorHex(_ name: String) -> String {
+    var h: UInt32 = 0
+    for unit in name.utf16 { h = h &* 31 &+ UInt32(unit) }
+    return personColors[Int(h % UInt32(personColors.count))]
   }
 
   // ── Badge (App Group, K2BadgeStore) ─────────────────────────────────
