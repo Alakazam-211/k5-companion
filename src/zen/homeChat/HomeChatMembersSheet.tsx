@@ -36,6 +36,7 @@ import {
 import { noteHomeChatGone, useHomeChatStore } from "./homeChatStore";
 import { ChannelGlyph, PersonAvatar } from "./HomeChatGlyphs";
 import { HomeChatConfirmSheet } from "./HomeChatConfirmSheet";
+import { HomeChatNotifySetting, useHomeChatPushOn } from "./HomeChatNotifySetting";
 
 const ROW = "flex items-center gap-3 min-w-0";
 const SECTION = "text-[12px] font-semibold uppercase tracking-wide px-1 mb-1";
@@ -62,6 +63,8 @@ export function HomeChatMembersSheet({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [ask, setAsk] = useState<"leave" | "delete" | null>(null);
   const vp = useViewport();
+  // K2 0.46.16: this person's push level for the channel.
+  const pushOn = useHomeChatPushOn(scope);
   useBackHandler(ask === null, onClose);
 
   useEffect(() => {
@@ -244,6 +247,7 @@ export function HomeChatMembersSheet({
           ) : null}
           {members ? (
             <>
+              {pushOn && members.state !== "archived" && inChannel.has(meExt) ? <HomeChatNotifySetting scope={scope} conv={conv} /> : null}
               <h3 className={SECTION} style={{ color: "var(--color-text-muted)" }}>
                 People
               </h3>

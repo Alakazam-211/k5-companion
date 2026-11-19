@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FEATURE_COMPANION_PAIRING } from "../api/pairing";
+import { HOME_CHAT_PUSH_FEATURE } from "../api/homeChatPure";
 import { scopeFor } from "../api/scope";
 import { useBackHandler } from "../lib/androidBack";
 import { readBackPreviews, setServerPreviews } from "../lib/push";
@@ -20,6 +21,7 @@ import { ServerUpdateSection } from "./ServerUpdateSection";
 import { switchToPairing, type PairStep } from "./pairFlow";
 import { useThreadFilesOn } from "./ThreadFiles";
 import { Switch } from "./ZenSettings";
+import { refreshHomeChatPushPrefs, setHomeChatTextPref, useHomeChatNotify } from "./homeChat/homeChatNotify";
 import { underHeaderPadding, useMeasuredHeight, ZenHeaderBlur } from "./ZenHeaderBlur";
 
 const MUTED = "var(--color-text-muted)";
@@ -327,6 +329,9 @@ function ShortcutsGroup({
   const prefs = useNotifyPrefsStore((s) => s.prefs[serverId]);
   const error = useNotifyPrefsStore((s) => s.errors[serverId] ?? null);
   const previewsFeature = usePushPreviewsStore((s) => s.feature[serverId] === true);
+  // K2 0.46.16: Home chat pushes (a Voice & Chat only login has no Thread
+  // bell, but gets these).
+  const homePush = useThreadFilesOn(scopeFor(serverId), HOME_CHAT_PUSH_FEATURE);
   useEffect(() => {
     if (pushOn) void readBackPreviews(serverId);
   }, [serverId, pushOn]);
@@ -368,6 +373,7 @@ function ShortcutsGroup({
       {showBell && prefs?.server.enabled && previewsFeature ? (
         <PreviewsRow serverId={serverId} />
       ) : null}
+      {hasToken && homePush ? <HomeChatTextRow serverId={serverId} topRule={showBell} /> : null}
       {/* Badge-push delivery counts; renders only where badge totals work
           (push available on iOS) — see BadgeDiagnostics.tsx. */}
       {showBell ? <BadgeDiagnosticsRow serverId={serverId} /> : null}
@@ -378,7 +384,7 @@ function ShortcutsGroup({
           style={{
             minHeight: 44,
             padding: "11px 16px",
-            borderTop: showBell ? HAIRLINE : undefined,
+            borderTop: showBell || homePush ? HAIRLINE : undefined,
           }}
           aria-label={`Usage on ${label}`}
           data-testid="server-settings-usage"
@@ -431,6 +437,54 @@ function PreviewsRow({ serverId }: { serverId: string }) {
         disabled={!allowed}
         labelledBy={labelId}
         onToggle={() => void setServerPreviews(serverId, !pref)}
+      />
+    </div>
+  );
+}
+
+/** Home chat's "Show message text" (K2 0.46.16 `home-chat-push-v1`,
+ *  `/cli/home-chat/push-prefs`): this person's choice on the server, for
+ *  every phone of theirs. The owner's switch (`serverPreviews` false)
+ *  locks it off. This phone's own "Show message previews" still keeps the
+ *  words off its lock screen. */
+export function HomeChatTextRow({ serverId, topRule }: { serverId: string; topRule: boolean }) {
+  const prefs = useHomeChatNotify((s) => s.prefs[serverId] ?? null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    void refreshHomeChatPushPrefs(scopeFor(serverId)).then((e) => {
+      if (live && e) setError(e);
+    });
+    return () => {
+      live = false;
+    };
+  }, [serverId]);
+  if (!prefs) return null;
+  const allowed = prefs.serverPreviews;
+  const labelId = `server-settings-chat-text-label-${serverId}`;
+  const status = error ?? (allowed ? "Show the words of chat messages in notifications." : "Turned off by the server owner");
+  return (
+    <div
+      className="flex items-center justify-between"
+      style={{ minHeight: 44, padding: "6px 12px 6px 16px", gap: 12, borderTop: topRule ? HAIRLINE : undefined }}
+      data-testid="server-settings-chat-text"
+    >
+      <span className="min-w-0 flex flex-col">
+        <span className="text-[17px]" id={labelId}>
+          Show chat message text
+        </span>
+        <span className="text-[13px]" style={{ color: error ? RED : MUTED, lineHeight: 1.35 }} data-testid="server-settings-chat-text-status">
+          {status}
+        </span>
+      </span>
+      <Switch
+        on={allowed && prefs.previews}
+        disabled={!allowed}
+        labelledBy={labelId}
+        onToggle={() => {
+          setError(null);
+          void setHomeChatTextPref(scopeFor(serverId), !prefs.previews).then((e) => e && setError(e));
+        }}
       />
     </div>
   );
