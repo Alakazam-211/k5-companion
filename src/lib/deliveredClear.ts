@@ -20,14 +20,20 @@ import { PUSH_PLUGIN, pushAvailability } from "./pushAvailability";
 // does the same in the background (totals 0, and K2 0.46.8 read hints).
 // Best-effort and quiet: a no-op off iOS or without push; never throws.
 
-export type ClearChat = { kind: "thread" | "project"; id: string; seq?: number };
+// Home chat (K2 0.46.16 `home-chat-push-v1`): a chat read here clears its
+// notifications up to the newest message (`kind: "home"`, `upTo`: a Sew id
+// as a string, never a JS number: it may pass 2^53). `keepOnly` never
+// touches Home chat notifications (they follow the Home count, not the
+// Thread totals).
+export type ThreadClearChat = { kind: "thread" | "project"; id: string; seq?: number };
+export type ClearChat = ThreadClearChat | { kind: "home"; id: string; upTo?: string | null };
 export type ClearPlan = { mode: "read" | "keepOnly"; chats: ClearChat[] };
 
 /** What one chat's new state clears, or null. */
 export function planForEntry(entry: UnreadEntry, totals: UnreadTotals | null): ClearPlan | null {
   if (totals && totals.total === 0) return { mode: "keepOnly", chats: [] };
   if (entry.unread > 0 || entry.waiting > 0) return null;
-  const chat: ClearChat = { kind: entry.kind, id: entry.id };
+  const chat: ThreadClearChat = { kind: entry.kind, id: entry.id };
   if (entry.lastReadSeq > 0) chat.seq = entry.lastReadSeq;
   return { mode: "read", chats: [chat] };
 }
@@ -38,7 +44,7 @@ export function planForSummary(s: ServerUnread): ClearPlan {
   const chats: ClearChat[] = [];
   for (const e of Object.values(s.byKey)) {
     if (e.unread <= 0 && e.waiting <= 0) continue;
-    const chat: ClearChat = { kind: e.kind, id: e.id };
+    const chat: ThreadClearChat = { kind: e.kind, id: e.id };
     // A waiting card keeps every notification of its chat.
     if (e.waiting <= 0 && e.lastReadSeq > 0) chat.seq = e.lastReadSeq;
     chats.push(chat);

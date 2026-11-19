@@ -50,6 +50,7 @@ import {
 import { authorName, convKey, homeChatDraftKey, memberNames, type HomeChatTarget } from "./homeChatModel";
 import { EMPTY_CONV, noteHomeChatMoved, useHomeChatStore, type SendState } from "./homeChatStore";
 import { useComposerDrafts } from "../composerDrafts";
+import { queuePersonAvatars } from "../../lib/avatarCache";
 
 /** A page; the reopen delta reads this many after the newest held. */
 export const HOME_CHAT_PAGE = HOME_CHAT_PAGE_DEFAULT;
@@ -92,7 +93,10 @@ export function ensureHomeChatPeople(scope: ServerScope, force = false): Promise
   if (running) return running;
   const p = (async () => {
     const r = await fetchHomeChatPeople(scope);
-    if (r.ok) st().setPeople(scope.id, { me: r.me, people: r.people });
+    if (!r.ok) return;
+    st().setPeople(scope.id, { me: r.me, people: r.people });
+    // Their pictures, for a push's big image (the NSE has no network).
+    queuePersonAvatars(scope.id, r.people);
   })().finally(() => peopleInflight.delete(scope.id));
   peopleInflight.set(scope.id, p);
   return p;

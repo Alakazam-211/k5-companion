@@ -23,15 +23,25 @@
 //   - read: `view {open}` while on screen, `ack` for the newest while the
 //     app is in front;
 //   - a call's record is a line with Call back (the calls part's hook);
-//   - a channel's header opens its members sheet.
+//   - a channel's header opens its members sheet;
+//   - a message that mentions you (Sew's `mentions`, or `@you` in its
+//     words) gets a quiet accent ring;
+//   - pushes (K2 0.46.16 `home-chat-push-v1` only): while the chat is on
+//     screen and the app in front, the viewing lease on the events socket
+//     (the daemon holds this chat's pushes) and the native side's "on
+//     screen" (a push for it that slips through shows no banner); reading
+//     it clears its notifications here too.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scopeFor } from "../../api/scope";
 import { ackHomeChat, homeChatGateNow, onHomeChatGate, viewHomeChat } from "../../api/homeChat";
-import { subscribeHomeChat } from "../../api/homeChatEvents";
+import { subscribeHomeChat, type HomeChatEventsSend } from "../../api/homeChatEvents";
+import { createViewingLease, type ViewingLease } from "../../api/homeChatViewing";
 import { REPLY_JUMP_MAX_PAGES, isOptimistic, typingMembers } from "../../api/homeChatHelpers";
-import { homeChatNoChatLine, type HomeChatMessage } from "../../api/homeChatPure";
+import { homeChatMentionsMe, homeChatNoChatLine, type HomeChatMessage } from "../../api/homeChatPure";
 import { copyPlainText } from "../../lib/clipboard";
+import { clearDelivered } from "../../lib/deliveredClear";
+import { setNativeHomeChatViewing } from "../../lib/homeChatPush";
 import { useViewport, useViewportPadRef } from "../../lib/useViewportHeight";
 import { useKeyboardFlip } from "../../kit/mobileChat/useKeyboardFlip";
 import { easeGapShift, useComposerFocusGap } from "../../kit/mobileChat/useComposerFocusGap";
@@ -94,6 +104,8 @@ import { HomeChatCallLine, HomeChatMessageRow, type HomeChatRowActions } from ".
 import { EmojiSheet, QUICK_ROW_PX, QuickReactionRow } from "./HomeChatReactions";
 import { HomeChatTyping } from "./HomeChatTyping";
 import { HomeChatMembersSheet } from "./HomeChatMembersSheet";
+import { useHomeChatPushOn } from "./HomeChatNotifySetting";
+import { applyHomeChatNotifyFrame } from "./homeChatNotify";
 import { ChannelAvatar, PersonAvatar } from "./HomeChatGlyphs";
 import "./homeChat.css";
 
@@ -201,6 +213,18 @@ export function HomeChatView({
     [serverId]
   );
 
+  // ── Pushes (K2 0.46.16): the viewing lease rides the events socket ──
+  const pushOn = useHomeChatPushOn(scope);
+  const sendRef = useRef<HomeChatEventsSend | null>(null);
+  const leaseRef = useRef<ViewingLease | null>(null);
+  if (!leaseRef.current) {
+    leaseRef.current = createViewingLease({
+      send: (text) => sendRef.current?.(text) ?? false,
+      setInterval: (fn, ms) => setInterval(fn, ms),
+      clearInterval: (t) => clearInterval(t as ReturnType<typeof setInterval>),
+    });
+  }
+
   // ── Reads, live frames, view / ack ──
   useEffect(() => {
     void ensureHomeChatPeople(scope);
@@ -217,11 +241,16 @@ export function HomeChatView({
       scope,
       (f) => {
         applyHomeChatFrame(serverId, f);
+        if (f.type === "notify") applyHomeChatNotifyFrame(serverId, f);
         if (f.type === "member_removed" && f.conv === conv && !dm) void loadHomeChatChannel(scope, conv);
       },
       {
         // Back after a drop: frames may be missing. Read what came after.
         onLink: (info) => {
+          // The lease goes again at once on every (re)opened socket: the
+          // daemon dropped it with the old one.
+          sendRef.current = info.up ? (info.send ?? null) : null;
+          if (info.up) leaseRef.current?.linked();
           if (info.up && info.reopened) {
             void loadHomeChatNewest(scope, conv);
             void viewHomeChat(scope, conv, true);
@@ -233,10 +262,30 @@ export function HomeChatView({
     const prune = setInterval(() => useHomeChatStore.getState().pruneTyping(Date.now()), 1000);
     return () => {
       unsub();
+      sendRef.current = null;
       clearInterval(prune);
       void viewHomeChat(scope, conv, false);
     };
   }, [scope, serverId, conv, dm]);
+
+  // On screen and in front: the lease (every 30 s), and the native side's
+  // "this chat is open". Hidden or gone: `visible:false` at once.
+  useEffect(() => {
+    const lease = leaseRef.current;
+    if (!lease || !conv || !pushOn) return;
+    const apply = () => {
+      const shown = typeof document === "undefined" || document.visibilityState !== "hidden";
+      lease.set(shown ? conv : null);
+      setNativeHomeChatViewing(shown ? serverId : null, shown ? conv : null);
+    };
+    apply();
+    document.addEventListener("visibilitychange", apply);
+    return () => {
+      document.removeEventListener("visibilitychange", apply);
+      lease.stop();
+      setNativeHomeChatViewing(null, null);
+    };
+  }, [pushOn, conv, serverId]);
 
   const real = useMemo(() => messages.filter((m) => !isOptimistic(m)), [messages]);
   const newestId = real.length ? real[real.length - 1].id : null;
@@ -245,7 +294,11 @@ export function HomeChatView({
     if (!conv || !newestId) return;
     const ack = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void ackHomeChat(scope, conv);
+      void ackHomeChat(scope, conv).then((r) => {
+        // Read here: its notifications up to the newest go too (the
+        // daemon's read hint clears the other phones).
+        if (r.ok) void clearDelivered(serverId, { mode: "read", chats: [{ kind: "home", id: conv, upTo: newestId }] });
+      });
     };
     ack();
     const onVis = () => {
@@ -253,7 +306,7 @@ export function HomeChatView({
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [scope, conv, newestId]);
+  }, [scope, serverId, conv, newestId]);
 
   // ── Who it is ──
   const person = dm && target.ext ? (people?.people.find((p) => p.ext === target.ext) ?? null) : null;
@@ -625,6 +678,17 @@ export function HomeChatView({
     };
   }, [people]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  // Messages that mention you: Sew's `mentions`, or `@<your username or
+  // name>` in the words.
+  const myNames = useMemo(() => {
+    const mine = people ? people.people.find((p) => p.ext === people.me.ext) : undefined;
+    return [scope.username(), mine?.username ?? "", mine?.displayName ?? ""].filter((n) => !!n.trim());
+  }, [people, scope]);
+  const mentionIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const m of messages) if (homeChatMentionsMe(m, { memberId: me, names: myNames })) out.add(m.id);
+    return out;
+  }, [messages, me, myNames]);
   const typingNow = useMemo(
     () => typingNames(roster ? typingMembers(roster, Date.now(), me) : [], me, names),
     [roster, me, names]
@@ -839,6 +903,7 @@ export function HomeChatView({
                     face={r.picture ? faces(r.m.authorId) : null}
                     reply={r.m.replyTo ? replyPreview(byId.get(r.m.replyTo), me, names) : null}
                     flash={flashId === r.m.id}
+                    mention={!r.mine && mentionIds.has(r.m.id)}
                     held={msgHold.menu?.id === r.m.id}
                     send={isOptimistic(r.m) && r.m.nonce ? (sends?.[r.m.nonce] ?? null) : null}
                     readOnly={readOnly}

@@ -265,6 +265,44 @@ export function queueAvatar(
   }
 }
 
+/** The cache key of a Home chat person's picture (K2 0.46.16 Home chat
+ *  pushes: the NSE looks up `<subdomain>|person:<senderExt>`). */
+export function personAvatarKey(subdomain: string, ext: string): string {
+  return avatarKey(subdomain, `person:${ext.trim()}`);
+}
+
+/** A server's Home chat people (`/cli/home-chat/people`): those with a
+ *  picture go to the notification cache, for a DM's or a channel's push.
+ *  Pure apart from the hash memo. */
+export function personAvatarItems(
+  subdomain: string,
+  people: ReadonlyArray<{ ext: string; picture: string | null }>
+): AvatarItem[] {
+  const out: AvatarItem[] = [];
+  for (const p of people) {
+    if (!p.ext.trim() || !isCacheableIcon(p.picture)) continue;
+    const dataUrl = p.picture.trim();
+    const key = personAvatarKey(subdomain, p.ext);
+    out.push({ key, rev: revFor(key, dataUrl, null), dataUrl });
+  }
+  return out;
+}
+
+/** After a server's Home chat people loaded. Never throws. */
+export function queuePersonAvatars(
+  serverId: string,
+  people: ReadonlyArray<{ ext: string; picture: string | null }>
+): void {
+  try {
+    if (disabled || !deps.enabled()) return;
+    const sub = subdomainOfServerUrl(deps.serverUrl(serverId));
+    if (!sub) return;
+    enqueue(personAvatarItems(sub, people));
+  } catch (e) {
+    console.warn("[avatars] queue skipped:", e);
+  }
+}
+
 /** Send what is queued now (the timer calls this). Concurrent calls share
  *  one run. Never throws. */
 export function flushAvatarCache(): Promise<void> {

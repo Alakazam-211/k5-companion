@@ -101,6 +101,7 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   run,
   reply,
   flash,
+  mention = false,
   held,
   send,
   readOnly,
@@ -118,6 +119,8 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   reply: ReplyPreview | null;
   /** Just jumped to: the accent wash. */
   flash: boolean;
+  /** Someone else's message that mentions you: a quiet accent ring. */
+  mention?: boolean;
   /** Its hold menu is open: the ring that follows the bubble. */
   held: boolean;
   send: RowSend;
@@ -156,9 +159,10 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   const nonce = optimistic ? m.id.slice(1) : null;
   const bubble = (
     <div
-      className={`relative px-3 py-2 leading-snug break-words min-w-0 max-w-full${tail ? " zen-tail" : ""}${held ? " zen-outlined" : ""}`}
+      className={`relative px-3 py-2 leading-snug break-words min-w-0 max-w-full${tail ? " zen-tail" : ""}${held ? " zen-outlined" : mention && !mine ? " k2-hc-mention" : ""}`}
       data-testid="home-chat-bubble"
       data-tail={tail || undefined}
+      data-mention={mention && !mine ? "" : undefined}
       {...{ [MESSAGE_HOLD_ATTR]: holdable ? m.id : undefined }}
       aria-haspopup={holdable ? "menu" : undefined}
       aria-description={holdable ? "Hold the bubble to react, reply or copy" : undefined}
