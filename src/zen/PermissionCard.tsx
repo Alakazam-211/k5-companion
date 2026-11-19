@@ -7,10 +7,14 @@
 // itself changes only when the daemon rewrites the doc (a frame or the
 // re-read that follows each write). Confirm actions (App approvals, the
 // node root step) take this login's password first (PermissionConfirmSheet).
+// Cards that need K2's own form before Allow (`cardForm`): the GitHub
+// credential card opens that form here (GitAccessSetupSheet) and sends Allow
+// once it's saved, like desktop; any other form card, or an Allow refused
+// `*_form_first`, shows "Set this up in K2 on your computer." and Deny.
 
-import { memo, useState, type ReactNode } from "react";
+import { memo, useRef, useState, type ReactNode } from "react";
 import type { ServerScope } from "../api/scope";
-import { answerPermission, notePermission, undoPermission, type PermissionWrite } from "../api/permissionCards";
+import { answerPermission, isFormFirstCode, notePermission, undoPermission, type PermissionWrite } from "../api/permissionCards";
 import {
   ALLOW,
   ALLOW_ALL,
@@ -18,6 +22,7 @@ import {
   DENY,
   DENY_ALL,
   DENY_REASON_MAX,
+  cardForm,
   noteProblem,
   pendingItems,
   stateLine,
@@ -26,6 +31,7 @@ import {
   type PermissionItem,
 } from "./permissionCardModel";
 import { PermissionConfirmSheet } from "./PermissionConfirmSheet";
+import { GitAccessSetupSheet } from "./GitAccessSetupSheet";
 
 // Inside the agent bubble (--color-bubble-agent): its quieter words.
 const MUTED = "var(--color-text-secondary)";
@@ -57,17 +63,37 @@ type Props = {
 
 type Confirm = { action: string; secretId: string; headline: string; item?: string };
 
+/** The card's key for per-request state: the batch item, or the card. */
+const CARD_KEY = "";
+
+/** Instead of Allow, for a card that needs K2's own form first. */
+export const FORM_ELSEWHERE_TEXT = "Set this up in K2 on your computer.";
+
 export const PermissionCard = memo(function PermissionCard({ card, id, addr, scope, enabled, onWritten }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
+  /** The GitHub setup form is open. */
+  const [gitForm, setGitForm] = useState(false);
+  /** This session set the GitHub credential: plain Allow is the way on. */
+  const [gitSet, setGitSet] = useState(false);
+  const gitSetRef = useRef(false);
+  /** Requests whose Allow came back `*_form_first` (K2's form first). */
+  const [formFirst, setFormFirst] = useState<ReadonlySet<string>>(() => new Set());
 
-  async function write(run: () => Promise<PermissionWrite>): Promise<string | null> {
+  async function write(run: () => Promise<PermissionWrite>, key = CARD_KEY): Promise<string | null> {
     setBusy(true);
     setError(null);
     const r = await run();
     setBusy(false);
     if (!r.ok) {
+      // "Set it up in K2's own form first": Allow can't work from here, so
+      // the card says where instead of showing a refusal (unless this card
+      // has the form here and the credential was just set).
+      if (isFormFirstCode(r.code) && !gitSetRef.current) {
+        setFormFirst((s) => new Set(s).add(key));
+        return r.text;
+      }
       setError(r.text);
       return r.text;
     }
@@ -76,7 +102,17 @@ export const PermissionCard = memo(function PermissionCard({ card, id, addr, sco
   }
 
   const answer = (label: string, opts: { item?: string; reason?: string; confirmToken?: string } = {}) =>
-    write(() => answerPermission(scope, addr, id, label, opts));
+    write(() => answerPermission(scope, addr, id, label, opts), opts.item ?? CARD_KEY);
+
+  /** What stands in for Allow: the GitHub form, "set it up on your
+   *  computer", or nothing (plain Allow). */
+  const allowMode = (item: PermissionItem, key: string): "git" | "elsewhere" | null => {
+    const form = cardForm(item);
+    if (form === "elsewhere") return "elsewhere";
+    if (form === "git-access-setup" && !gitSet) return key === CARD_KEY ? "git" : "elsewhere";
+    if (formFirst.has(key)) return "elsewhere";
+    return null;
+  };
 
   function allow(item: PermissionItem, batchItem?: string) {
     if (item.proof.kind === "confirm") {
@@ -89,11 +125,12 @@ export const PermissionCard = memo(function PermissionCard({ card, id, addr, sco
   return (
     <div className="flex flex-col" style={{ gap: 8 }} data-testid="permission-card" data-state={card.kind === "permission" ? card.state : card.state}>
       {card.kind === "permission" ? (
-        <Single card={card} enabled={enabled && !busy} onAllow={() => allow(card.item)} onDeny={(reason) => void answer(DENY, reason ? { reason } : {})} onClose={() => void answer(CLOSE)} onUndo={() => void write(() => undoPermission(scope, addr, id))} onNote={(text) => write(() => notePermission(scope, addr, id, text))} />
+        <Single card={card} enabled={enabled && !busy} allowMode={allowMode(card.item, CARD_KEY)} onSetUp={() => setGitForm(true)} onAllow={() => allow(card.item)} onDeny={(reason) => void answer(DENY, reason ? { reason } : {})} onClose={() => void answer(CLOSE)} onUndo={() => void write(() => undoPermission(scope, addr, id))} onNote={(text) => write(() => notePermission(scope, addr, id, text))} />
       ) : (
         <Batch
           card={card}
           enabled={enabled && !busy}
+          allowMode={(it) => allowMode(it, it.requestId)}
           onAllow={(it) => allow(it, it.requestId)}
           onDeny={(it) => void answer(DENY, { item: it.requestId })}
           onAllowAll={() => void answer(ALLOW_ALL)}
@@ -102,9 +139,29 @@ export const PermissionCard = memo(function PermissionCard({ card, id, addr, sco
       )}
       {busy ? <Muted>Sending…</Muted> : null}
       {error ? (
-        <p className="text-[12px]" role="alert" style={{ color: "var(--color-status-error-bright)" }} data-testid="permission-error">
+        <p
+          className="text-[12px] leading-snug"
+          role="alert"
+          style={{ color: "var(--color-status-error-bright)", overflowWrap: "anywhere" }}
+          data-testid="permission-error"
+        >
           {error}
         </p>
+      ) : null}
+      {gitForm ? (
+        <GitAccessSetupSheet
+          scope={scope}
+          onCancel={() => setGitForm(false)}
+          onDone={() => {
+            // Desktop's pattern: the credential is in the vault, so Allow
+            // now goes through (the daemon sees it's set).
+            setGitForm(false);
+            gitSetRef.current = true;
+            setGitSet(true);
+            setFormFirst(new Set());
+            void answer(ALLOW);
+          }}
+        />
       ) : null}
       {confirm ? (
         <PermissionConfirmSheet
@@ -196,6 +253,8 @@ function Details({ item, compact }: { item: PermissionItem; compact?: boolean })
 function Single({
   card,
   enabled,
+  allowMode,
+  onSetUp,
   onAllow,
   onDeny,
   onClose,
@@ -204,6 +263,9 @@ function Single({
 }: {
   card: Extract<PermissionCardModel, { kind: "permission" }>;
   enabled: boolean;
+  /** What stands in for Allow (see PermissionCard's `allowMode`). */
+  allowMode: "git" | "elsewhere" | null;
+  onSetUp: () => void;
   onAllow: () => void;
   onDeny: (reason: string) => void;
   onClose: () => void;
@@ -254,9 +316,17 @@ function Single({
             </div>
           </div>
         ) : (
-          <div className="flex flex-wrap" style={{ gap: 6 }}>
-            <Button label={ALLOW} primary onClick={onAllow} disabled={!enabled} testId="permission-allow" />
-            <Button label={DENY} onClick={() => setDenying(true)} disabled={!enabled} testId="permission-deny" />
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            <div className="flex flex-wrap items-center" style={{ gap: 6 }}>
+              {allowMode === "git" ? (
+                <Button label="Set up GitHub access" primary onClick={onSetUp} disabled={!enabled} testId="permission-git-setup" />
+              ) : allowMode === null ? (
+                <Button label={ALLOW} primary onClick={onAllow} disabled={!enabled} testId="permission-allow" />
+              ) : null}
+              <Button label={DENY} onClick={() => setDenying(true)} disabled={!enabled} testId="permission-deny" />
+            </div>
+            {allowMode === "git" ? <Muted testId="permission-git-note">You enter the key or token in K2's form. The agent never sees it.</Muted> : null}
+            {allowMode === "elsewhere" ? <Muted testId="permission-form-elsewhere">{FORM_ELSEWHERE_TEXT}</Muted> : null}
           </div>
         )
       ) : null}
@@ -326,6 +396,7 @@ function NoteBox({ max, mine, enabled, onNote }: { max: number; mine: string | n
 function Batch({
   card,
   enabled,
+  allowMode,
   onAllow,
   onDeny,
   onAllowAll,
@@ -333,6 +404,7 @@ function Batch({
 }: {
   card: Extract<PermissionCardModel, { kind: "batch" }>;
   enabled: boolean;
+  allowMode: (it: PermissionItem) => "git" | "elsewhere" | null;
   onAllow: (it: PermissionItem) => void;
   onDeny: (it: PermissionItem) => void;
   onAllowAll: () => void;
@@ -346,7 +418,7 @@ function Batch({
       <p className="text-[15px] font-semibold" data-testid="permission-batch-title">
         {by ? `${by} asks for ${card.items.length} permissions` : `${card.items.length} permission requests`}
       </p>
-      {approver && card.viewer.canAnswerAll && pending.length > 0 ? (
+      {approver && card.viewer.canAnswerAll && pending.length > 0 && !pending.some((it) => allowMode(it) !== null) ? (
         <div className="flex flex-wrap" style={{ gap: 6 }}>
           <Button label={`${ALLOW_ALL} (${pending.length})`} primary onClick={onAllowAll} disabled={!enabled} testId="permission-allow-all" />
           <Button label={DENY_ALL} onClick={onDenyAll} disabled={!enabled} testId="permission-deny-all" />
@@ -357,9 +429,14 @@ function Batch({
           <div key={it.requestId} className="flex flex-col" style={{ gap: 6, paddingTop: 8, borderTop: "1px solid var(--color-wash-2)" }} data-testid="permission-batch-item" data-state={it.state}>
             <Details item={it} compact />
             {it.state === "pending" && approver ? (
-              <div className="flex flex-wrap" style={{ gap: 6 }}>
-                <Button label={ALLOW} primary onClick={() => onAllow(it)} disabled={!enabled} testId="permission-item-allow" />
-                <Button label={DENY} onClick={() => onDeny(it)} disabled={!enabled} testId="permission-item-deny" />
+              <div className="flex flex-col" style={{ gap: 6 }}>
+                <div className="flex flex-wrap" style={{ gap: 6 }}>
+                  {allowMode(it) === null ? (
+                    <Button label={ALLOW} primary onClick={() => onAllow(it)} disabled={!enabled} testId="permission-item-allow" />
+                  ) : null}
+                  <Button label={DENY} onClick={() => onDeny(it)} disabled={!enabled} testId="permission-item-deny" />
+                </div>
+                {allowMode(it) !== null ? <Muted testId="permission-form-elsewhere">{FORM_ELSEWHERE_TEXT}</Muted> : null}
               </div>
             ) : it.state !== "pending" ? (
               <Muted>{it.state === "approved" ? `Allowed${it.answer?.by ? ` by ${it.answer.by}` : ""}` : it.state === "denied" ? `Denied${it.answer?.by ? ` by ${it.answer.by}` : ""}` : it.state.replace("_", " ")}</Muted>

@@ -10,24 +10,42 @@ import { scopedFetch } from "./scopedFetch";
 
 export type PermissionWrite = { ok: true } | { ok: false; status: number | null; code: string; text: string };
 
-function parseError(text: string): { code: string; reason: string; required: string; hint: string } {
+type ParsedError = { code: string; reason: string; required: string; message: string };
+
+/** The daemon's refusal: `{ok:false, error:{code, hint, …}}` (`answer::err`,
+ *  compute's `refusal_response`). The words are `error.hint`; `message`
+ *  (inside `error` or at the top) is read too, for routes that say it so. */
+export function parseError(text: string): ParsedError {
+  const s = (v: unknown) => (typeof v === "string" ? v.trim() : "");
   try {
     const j = JSON.parse(text) as Record<string, unknown>;
     const e = j.error;
+    const top = s(j.message) || s(j.hint);
     if (e && typeof e === "object") {
       const o = e as Record<string, unknown>;
-      const s = (v: unknown) => (typeof v === "string" ? v : "");
-      return { code: s(o.code), reason: s(o.reason) || s(j.reason), required: s(o.required) || s(j.required), hint: s(o.hint) };
+      return {
+        code: s(o.code),
+        reason: s(o.reason) || s(j.reason),
+        required: s(o.required) || s(j.required),
+        message: s(o.hint) || s(o.message) || top,
+      };
     }
-    if (typeof e === "string") return { code: e, reason: "", required: "", hint: "" };
+    if (typeof e === "string") return { code: e, reason: "", required: "", message: top };
+    return { code: s(j.code), reason: "", required: "", message: top };
   } catch {
     /* plain text */
   }
-  return { code: "", reason: "", required: "", hint: "" };
+  return { code: "", reason: "", required: "", message: "" };
+}
+
+/** A refusal that means "do this in K2's own form first" (e.g.
+ *  `git_access_setup_form_first`): Allow can't work from here yet. */
+export function isFormFirstCode(code: string): boolean {
+  return /_form_first$/.test(code);
 }
 
 /** What a person reads for a refused write. */
-export function permissionErrorText(status: number | null, code: string, reason = "", required = ""): string {
+export function permissionErrorText(status: number | null, code: string, reason = "", required = "", message = ""): string {
   switch (code) {
     case "card_not_pending":
     case "request_not_pending":
@@ -55,6 +73,8 @@ export function permissionErrorText(status: number | null, code: string, reason 
     case "usage":
       return "This card changed. Pull to refresh.";
     default:
+      // The daemon's own words, when it sent some.
+      if (message) return message;
       return status == null ? "Could not reach the server." : `Could not send (HTTP ${status}).`;
   }
 }
@@ -64,7 +84,7 @@ async function post(scope: ServerScope, path: string, body: Record<string, unkno
     const r = await scopedFetch(scope, path, { method: "POST", body: JSON.stringify(body), timeoutMs: 20_000 });
     if (r.ok) return { ok: true };
     const e = parseError(r.text);
-    return { ok: false, status: r.status, code: e.code, text: permissionErrorText(r.status, e.code, e.reason, e.required) };
+    return { ok: false, status: r.status, code: e.code, text: permissionErrorText(r.status, e.code, e.reason, e.required, e.message) };
   } catch {
     return { ok: false, status: null, code: "network", text: permissionErrorText(null, "network") };
   }
@@ -94,4 +114,23 @@ export function notePermission(scope: ServerScope, addr: string, id: string, tex
 
 export function undoPermission(scope: ServerScope, addr: string, id: string): Promise<PermissionWrite> {
   return post(scope, "/cli/thread/permission-undo", { addr, id });
+}
+
+/** This server's GitHub credential for compute jobs (K2 0.46.10): a GitHub
+ *  App (its numeric App ID + the private key PEM) or a fine-grained token. */
+export type GitAccessSetup = { kind: "app"; appId: string; keyPem: string } | { kind: "token"; token: string };
+
+/** The setup route, the one `k2 compute git-access setup` uses. */
+export const GIT_ACCESS_SETUP_ROUTE = "/cli/compute/git-access/setup";
+
+/** The route's body: `{app_id, key_pem}` or `{token}`. */
+export function gitAccessBody(v: GitAccessSetup): Record<string, string> {
+  return v.kind === "app" ? { app_id: v.appId.trim(), key_pem: v.keyPem } : { token: v.token.trim() };
+}
+
+/** `POST /cli/compute/git-access/setup` as this person (owner or admin):
+ *  the key or token goes straight into the server's vault, never through
+ *  the card, the Thread or the agent. Nothing here logs or keeps it. */
+export function setupGitAccess(scope: ServerScope, v: GitAccessSetup): Promise<PermissionWrite> {
+  return post(scope, GIT_ACCESS_SETUP_ROUTE, gitAccessBody(v));
 }
