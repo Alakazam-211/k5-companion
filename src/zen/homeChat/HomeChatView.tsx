@@ -125,11 +125,6 @@ const AVATAR_LIFT = "drop-shadow(0 3px 8px var(--color-shadow))";
 const COMPOSER_PREFIX = "home-chat-composer";
 /** The Thread's words when a stash save fails. */
 const STASH_FAILED = "Couldn't save to the stash. Try again.";
-/** How far below the floating header text starts to fade once the list
- *  has scrolled (the scroll-edge fade, `.zen-header-blur--edge`): 24px
- *  below the name pill, whose bottom edge is the header's 12px padding
- *  above the header's bottom. */
-const HEADER_FADE_PX = 12;
 
 /** The composer draft's key for a conversation (kept here for callers). */
 export { homeChatDraftKey };
@@ -344,19 +339,6 @@ export function HomeChatView({
   const [atNewest, setAtNewest] = useState(true);
   const [newCount, setNewCount] = useState(0);
   const [headerRef, headerPx] = useMeasuredHeight(HEADER_PX);
-  // The header's scroll-edge fade is on once the list is off its top (at
-  // rest the first message sits sharp just under the header).
-  const headerBlurRef = useRef<HTMLDivElement>(null);
-  const markScrolled = (el: HTMLElement) => {
-    const blur = headerBlurRef.current;
-    if (!blur) return;
-    const on = el.scrollTop > 1;
-    if ((blur.getAttribute("data-scrolled") === "1") !== on) blur.setAttribute("data-scrolled", on ? "1" : "0");
-  };
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (el) markScrolled(el);
-  });
   const [dockPx, setDockPx] = useState(0);
   const dockPxRef = useRef<number | null>(null);
 
@@ -717,16 +699,11 @@ export function HomeChatView({
         data-testid="home-chat-header"
         style={{ zIndex: 10, paddingTop: "env(safe-area-inset-top)", pointerEvents: "none" }}
       >
-        {/* The scroll-edge fade (K2 Design 4.3.0): once the list has
-            scrolled, text fades in the band under the header and is gone
-            before it reaches the name pill (`--edge` in index.css). */}
-        <div
-          ref={headerBlurRef}
-          className="zen-header-blur zen-header-blur--early zen-header-blur--edge"
-          data-testid="home-chat-header-blur"
-          style={{ ["--zen-edge-fade" as string]: `${HEADER_FADE_PX}px` }}
-          aria-hidden
-        >
+        {/* The agent chats' header blur and tint, as they are (Riley
+            2026-11-19: "DMs on mobile should have the same gradient system
+            at the top of the page as in the chats with agents"; replaces
+            4.3.0's solid scroll-edge fade, `--edge`). */}
+        <div className="zen-header-blur" data-testid="home-chat-header-blur" aria-hidden>
           <span className="zen-header-blur-1" />
           <span className="zen-header-blur-2" />
           <span className="zen-header-blur-3" />
@@ -800,7 +777,6 @@ export function HomeChatView({
         data-testid="home-chat-scroller"
         onScroll={(e) => {
           const el = e.currentTarget;
-          markScrolled(el);
           lastScrollAt.current = Date.now();
           const prev = lastTop.current;
           lastTop.current = el.scrollTop;

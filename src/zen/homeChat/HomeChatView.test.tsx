@@ -439,21 +439,19 @@ describe("K2 Design's review (4.3.0)", () => {
     expect(save.mock.calls[1][0]).toMatchObject({ text: "for the room", source: { agent: "9", agent_name: "#design" } });
   });
 
-  it("the floating header fades text under it once the list has scrolled", () => {
+  it("the floating header has the agent chats' blur and tint (Zen.tsx), not a solid fade", () => {
     seed([msg("10", ANA, "a"), msg("11", ANA, "b")]);
     render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
     const blur = screen.getByTestId("home-chat-header-blur");
-    expect(blur.className).toContain("zen-header-blur--edge");
-    // The fade starts 24px below the pill (12px header padding + 12px).
-    expect(blur.style.getPropertyValue("--zen-edge-fade")).toBe("12px");
-    expect(blur.getAttribute("data-scrolled")).not.toBe("1");
+    expect(blur.className).toBe("zen-header-blur");
+    expect([...blur.children].map((c) => c.className)).toEqual([
+      "zen-header-blur-1",
+      "zen-header-blur-2",
+      "zen-header-blur-3",
+      "zen-header-blur-4",
+      "zen-header-tint",
+    ]);
     const scroller = screen.getByTestId("home-chat-scroller");
-    scroller.scrollTop = 120;
-    fireEvent.scroll(scroller);
-    expect(blur.getAttribute("data-scrolled")).toBe("1");
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
-    expect(blur.getAttribute("data-scrolled")).toBe("0");
     // The first message starts below the header (and its air).
     expect(scroller.style.paddingTop).toContain("env(safe-area-inset-top)");
   });
