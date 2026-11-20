@@ -26,6 +26,9 @@ import {
   glideList,
   springDamping,
   springProgress,
+  runSendFly,
+  FLY_TAIL_CLASS,
+  FLY_TEXT_SELECTOR,
 } from "./sendFly";
 
 afterEach(() => {
@@ -308,5 +311,59 @@ describe("the blue's first frame: the typed text's extent (default) or the field
     const f = shapeFlight(start.rect, bubble, { from: start.radius, to: 18 });
     expect(f.visibleAt(0)).toEqual(start.rect);
     expect(f.visibleAt(1)).toEqual(bubble);
+  });
+});
+
+describe("runSendFly's app names are options (the kit imports nothing from the app)", () => {
+  function setup(): { root: HTMLElement; bubble: HTMLElement; scales: number[] } {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const r = this.hasAttribute("data-bubble")
+        ? { left: 200, top: 500, width: 80, height: 36 }
+        : { left: 0, top: 0, width: 390, height: 844 };
+      return { ...r, right: r.left + r.width, bottom: r.top + r.height, x: r.left, y: r.top, toJSON: () => r };
+    });
+    const scales: number[] = [];
+    Element.prototype.animate = vi.fn(function (frames: Keyframe[]) {
+      const t = frames[0]?.transform;
+      const m = typeof t === "string" ? /scale\(([\d.]+)\)/.exec(t) : null;
+      if (m) scales.push(parseFloat(m[1]));
+      return { onfinish: null, oncancel: null, cancel: vi.fn() };
+    }) as never;
+    const root = document.createElement("div");
+    const bubble = document.createElement("div");
+    bubble.setAttribute("data-bubble", "");
+    bubble.setAttribute("data-tail", "mine");
+    bubble.innerHTML = '<div class="chat-markdown" style="font-size:17px">hi</div><div class="words" style="font-size:34px">hi</div>';
+    root.appendChild(bubble);
+    document.body.appendChild(root);
+    return { root, bubble, scales };
+  }
+  const source: FlySource = { rect: { left: 20, top: 700, width: 300, height: 24 }, fontPx: 17 };
+
+  afterEach(() => {
+    // @ts-expect-error test cleanup
+    delete Element.prototype.animate;
+    document.body.innerHTML = "";
+  });
+
+  it("defaults: the app's lone-tail class and markdown body", () => {
+    const { root, bubble, scales } = setup();
+    const cancel = runSendFly({ root, bubble, source, done: () => {} });
+    const tail = root.querySelector<HTMLElement>('[data-fly-part="tail"]');
+    expect(tail?.className).toBe(FLY_TAIL_CLASS);
+    expect(FLY_TAIL_CLASS).toBe("zen-tail-solo");
+    expect(FLY_TEXT_SELECTOR).toBe(".chat-markdown");
+    // Field 17px over the markdown's 17px: no scale.
+    expect(scales[0]).toBe(1);
+    cancel();
+  });
+
+  it("a surface passes its own tail class and words selector", () => {
+    const { root, bubble, scales } = setup();
+    const cancel = runSendFly({ root, bubble, source, done: () => {}, tailClass: "my-tail", textSelector: ".words" });
+    expect(root.querySelector<HTMLElement>('[data-fly-part="tail"]')?.className).toBe("my-tail");
+    // Field 17px over the words' 34px: the text starts at half size.
+    expect(scales[0]).toBe(0.5);
+    cancel();
   });
 });

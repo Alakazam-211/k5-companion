@@ -20,7 +20,7 @@ import type { HomeChatMessage } from "../../api/homeChatPure";
 import { callRecordLine } from "../../api/homeChatCallsPure";
 import { ChatMessageBody } from "../../components/ChatMessage";
 import { MESSAGE_HOLD_ATTR } from "../stash/useMessageHold";
-import { SENDING_OPACITY } from "../useDeliverBrighten";
+import { SENDING_OPACITY } from "../../kit/mobileChat/useDeliverBrighten";
 import { DELETED_TEXT, mountainTime } from "../threadModel";
 import { bubbleBodyStyle } from "../ThreadPane";
 import { PhoneIcon } from "../icons";

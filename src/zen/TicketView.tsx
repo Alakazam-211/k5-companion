@@ -8,7 +8,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
-import { SENDING_OPACITY, useDeliverBrighten } from "./useDeliverBrighten";
+import { SENDING_OPACITY, useDeliverBrighten } from "../kit/mobileChat/useDeliverBrighten";
 import { receiptRow } from "./chatReceipt";
 import {
   assignFeedback,
@@ -63,8 +63,8 @@ import {
   rectOf,
   runSendFly,
   type FlySource,
-} from "./sendFly";
-import "./sendFly.css";
+} from "../kit/mobileChat/sendFly";
+import "../kit/mobileChat/sendFly.css";
 import "./chatBubbles.css";
 import {
   commentInFlight,

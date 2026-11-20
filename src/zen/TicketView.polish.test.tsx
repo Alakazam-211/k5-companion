@@ -4,7 +4,7 @@
 // optimistic comment that flies in and only brightens on delivery, the
 // "New comment ↓" pill and a draft per ticket.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SENDING_OPACITY } from "./useDeliverBrighten";
+import { SENDING_OPACITY } from "../kit/mobileChat/useDeliverBrighten";
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("../api/client", () => ({

@@ -60,7 +60,7 @@ import { ServerChip } from "../room/ServerChip";
 import { useMessageHold } from "../stash/useMessageHold";
 import { captureTopMessage, nearNewest, restoreTopMessage, stickToNewest, type MessageAnchor } from "../threadScroll";
 import { composerDraftOf, useComposerDrafts } from "../composerDrafts";
-import { prefersReducedMotion } from "../sendFly";
+import { prefersReducedMotion } from "../../kit/mobileChat/sendFly";
 import {
   ORIGINAL_DELETED,
   ORIGINAL_NOT_LOADED,

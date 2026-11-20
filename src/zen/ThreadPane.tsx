@@ -11,7 +11,7 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { SENDING_OPACITY, useDeliverBrighten } from "./useDeliverBrighten";
+import { SENDING_OPACITY, useDeliverBrighten } from "../kit/mobileChat/useDeliverBrighten";
 import { WorkspaceAvatar } from "./WorkspaceAvatar";
 import { chatRuns, pictureRows, receiptFor, receiptRow } from "./chatReceipt";
 import {
@@ -123,7 +123,7 @@ import {
   runSendFly,
   type FlyMotion,
   type FlySource,
-} from "./sendFly";
+} from "../kit/mobileChat/sendFly";
 import {
   ARRIVAL_RECENT_MS,
   REPLY_FOLD_MS,
@@ -133,9 +133,9 @@ import {
   fadeInRows,
   incomingMotion,
   type ListGlider,
-} from "./listGlide";
+} from "../kit/mobileChat/listGlide";
 import { queueSend, requeueIfUnreachable, shouldQueueSend, useQueuedSendFlush } from "./sendQueue";
-import "./sendFly.css";
+import "../kit/mobileChat/sendFly.css";
 import "./chatBubbles.css";
 import { newestSeenSeq, type RowRef } from "./unread";
 import { useUnreadStore } from "./unreadStore";
