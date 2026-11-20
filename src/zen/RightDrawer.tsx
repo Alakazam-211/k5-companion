@@ -20,7 +20,7 @@ import {
 } from "./chatterSwipe";
 import { useFileDrag } from "./fileDrag";
 import { PIN_HOLD_MS } from "./pinChats";
-import { prefersReducedMotion } from "./sendFly";
+import { prefersReducedMotion } from "../kit/mobileChat/sendFly";
 
 /** Space between the drawer and the screen's edges. */
 export const DRAWER_GAP_PX = 8;

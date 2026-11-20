@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react";
-import { prefersReducedMotion } from "./sendFly";
+import { prefersReducedMotion } from "../kit/mobileChat/sendFly";
 import { DRAWER_EASE_GROW, DRAWER_EASE_IN, DRAWER_EASE_OUT, DRAWER_MS } from "./ThreadWorkingStrip";
 
 // The Thread's pill over the composer (owner 2026-11-11, with K2 desktop):

@@ -8,7 +8,10 @@
 // (ThreadDraftComposer / GlassComposer, drafts kept per conversation), the
 // message hold menu (useMessageHold + AgentMenu), the reply chip and quote
 // line, the jump pill, and the mobile chat kit (keyboard FLIP, interactive
-// dismiss, scroll room, focus gap, tap to dismiss).
+// dismiss, scroll room, focus gap, tap to dismiss) and its send motion:
+// the typed text flies into its bubble as the list glides up to make room
+// (fades under reduced motion), and the Sending… bubble breathes, then
+// brightens when delivered.
 //
 // What differs:
 //   - names over every run in a channel; in a DM only the other person's;
@@ -60,7 +63,15 @@ import { ServerChip } from "../room/ServerChip";
 import { useMessageHold } from "../stash/useMessageHold";
 import { captureTopMessage, nearNewest, restoreTopMessage, stickToNewest, type MessageAnchor } from "../threadScroll";
 import { composerDraftOf, useComposerDrafts } from "../composerDrafts";
-import { prefersReducedMotion } from "../sendFly";
+import {
+  flySourceOfField,
+  prefersReducedMotion,
+  rectOf,
+  runSendFly,
+  type FlyMotion,
+  type FlySource,
+} from "../../kit/mobileChat/sendFly";
+import { createListGlider, type ListGlider } from "../../kit/mobileChat/listGlide";
 import {
   ORIGINAL_DELETED,
   ORIGINAL_NOT_LOADED,
@@ -123,6 +134,8 @@ const TYPING_ROOM_PX = 20;
 const FLASH_MS = 1400;
 const AVATAR_LIFT = "drop-shadow(0 3px 8px var(--color-shadow))";
 const COMPOSER_PREFIX = "home-chat-composer";
+/** A fade (reduced motion) is done by then (sendFly.css: 180 ms). */
+const FLY_FADE_MS = 220;
 /** The Thread's words when a stash save fails. */
 const STASH_FAILED = "Couldn't save to the stash. Try again.";
 
@@ -147,6 +160,18 @@ function dockBlockPx(dock: HTMLElement): number {
 }
 
 type PendingReply = { id: string; from: string; text: string };
+
+/** The send animation: which bubble (by its send's nonce, the row's key
+ *  from optimistic to the server's copy) flies in, and from where. */
+type HomeFly = {
+  nonce: string;
+  source: FlySource | null;
+  /** Reduced motion / no Web Animations: fade instead of fly. */
+  fade: boolean;
+  /** The newest row and its top before Send: how far the list moves to
+   *  make room (the glide). */
+  anchor: MessageAnchor | null;
+};
 
 export function HomeChatView({
   target,
@@ -348,6 +373,19 @@ export function HomeChatView({
     if (on) setNewCount(0);
   };
 
+  // ── The send motion (mobile chat kit) ──
+  const [fly, setFly] = useState<HomeFly | null>(null);
+  // One owner for the list's transform: a second send mid-glide folds in.
+  const gliderRef = useRef<ListGlider | null>(null);
+  if (!gliderRef.current) gliderRef.current = createListGlider(() => contentRef.current);
+  const glider = gliderRef.current;
+  // Another conversation: nothing of this one's flight carries over.
+  useLayoutEffect(() => {
+    setFly(null);
+    glider.cancel();
+  }, [key, glider]);
+  useEffect(() => () => glider.cancel(), [glider]);
+
   // The dock floats over the scroller's bottom: measure it.
   useLayoutEffect(() => {
     const dock = dockRef.current;
@@ -459,6 +497,60 @@ export function HomeChatView({
     setNewCount((n) => n + 1);
   }, [key, messages, me]);
 
+  // The send fly (FLIP "last/invert/play"), once per send. The row is in
+  // its final slot (hidden while it flies); the field already snapped to
+  // one empty line in the Send commit.
+  const flyKey = fly ? fly.nonce : "";
+  useLayoutEffect(() => {
+    if (!fly) return;
+    const id = fly.nonce;
+    const clear = () => setFly((cur) => (cur?.nonce === id ? null : cur));
+    const el = scrollerRef.current;
+    const root = rootRef.current;
+    // The cleared field shrank the dock in this commit, but its
+    // ResizeObserver reports a frame later: take the new height now, so
+    // the slot is final before the bubble is aimed.
+    const dock = dockRef.current;
+    const px = dock ? dockBlockPx(dock) : 0;
+    if (el && px > 0 && px !== dockPxRef.current) {
+      dockPxRef.current = px;
+      el.style.paddingBottom = threadBottomPadding(px, TYPING_ROOM_PX);
+      setDockPx(px);
+    }
+    if (el && !interactiveRef.current) {
+      stickToNewest(el);
+      lastTop.current = el.scrollTop;
+    }
+    if (fly.fade || !fly.source) {
+      const t = setTimeout(clear, FLY_FADE_MS);
+      return () => clearTimeout(t);
+    }
+    const target = () => root?.querySelector<HTMLElement>('[data-fly-target="true"]') ?? null;
+    const bubble = target();
+    if (!root || !bubble) {
+      clear();
+      return;
+    }
+    // The list makes room as the bubble comes in, on the bubble's curve,
+    // started once the bubble's resting rect is read (glide-free).
+    const a = fly.anchor;
+    const now = a && a.el.isConnected ? rectOf(a.el) : null;
+    const dy = a && now ? a.top - now.top : 0;
+    const glide =
+      el && Math.abs(dy) >= 1 && Math.abs(dy) <= el.clientHeight
+        ? {
+            content: contentRef.current,
+            dy,
+            run: (d: number, motion: FlyMotion) => {
+              glider.shift(d, { motion });
+              return () => {};
+            },
+          }
+        : undefined;
+    return runSendFly({ root, bubble, target, source: fly.source, done: clear, glide });
+    // Once per send: a re-render mid-flight must not restart it.
+  }, [flyKey]);
+
   // ── Older pages: keep the message being read where it is ──
   const olderAnchor = useRef<MessageAnchor | null>(null);
   const rowsNow = () => Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-home-chat-msg]") ?? []);
@@ -549,22 +641,50 @@ export function HomeChatView({
     return () => flush();
   }, []);
 
+  /** Send tap: clear the field at once (focus and keyboard stay), show
+   *  the bubble "Sending…", fly the text into it, deliver behind it. */
   const onSend = () => {
     if (!conv || readOnly) return;
     const text = (draftApi.current?.get() ?? "").trim();
     if (!text) return;
     const replyTo = reply?.id ?? null;
+    // Where the text sits now, before it is cleared (the FLIP "first"),
+    // and the newest row's top (after the new row is in, how far it moved).
+    const source = flySourceOfField(composerRef.current);
+    const drawn = rowsNow();
+    const lastRow = drawn.length ? drawn[drawn.length - 1] : null;
+    const lastRect = rectOf(lastRow);
+    const anchor = lastRow && lastRect ? { el: lastRow, top: lastRect.top } : null;
     draftApi.current?.set("");
     setReply(null);
     setError(null);
     setJumpMiss(null);
     setFollowing(true);
     composerRef.current?.focus({ preventScroll: true });
-    void sendHomeChat(scope, conv, { text, replyTo }).then((ok) => {
+    const queued: { nonce: string | null } = { nonce: null };
+    void sendHomeChat(
+      scope,
+      conv,
+      { text, replyTo },
+      {
+        // Only a bubble this send just added flies (a "Not sent" one of
+        // the same words is already on screen: it just goes Sending…).
+        onQueued: (nonce, fresh) => {
+          if (fresh) queued.nonce = nonce;
+        },
+      }
+    ).then((ok) => {
       if (ok) return;
       // Found by its words on this server: a DM Sew lost may have moved.
       setError(sendFailedNote(findHomeChatSend(serverId, { text })));
     });
+    if (!queued.nonce) return;
+    const canFly =
+      !prefersReducedMotion() &&
+      source != null &&
+      typeof Element !== "undefined" &&
+      typeof Element.prototype.animate === "function";
+    setFly({ nonce: queued.nonce, source: canFly ? source : null, fade: !canFly, anchor: canFly ? anchor : null });
   };
 
   const actions = useMemo<HomeChatRowActions>(
@@ -886,6 +1006,8 @@ export function HomeChatView({
                     readOnly={readOnly}
                     canEdit={draftBlank}
                     actions={actions}
+                    flying={!!fly && !fly.fade && !!r.m.nonce && r.m.nonce === fly.nonce}
+                    fadeIn={!!fly && fly.fade && !!r.m.nonce && r.m.nonce === fly.nonce}
                   />
                 )
               )}

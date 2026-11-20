@@ -41,8 +41,8 @@ import {
   FLY_MS,
   FLY_TEXT_AT,
   FLY_TEXT_BLUR_PX,
-} from "./sendFly";
-import { SENDING_OPACITY } from "./useDeliverBrighten";
+} from "../kit/mobileChat/sendFly";
+import { SENDING_OPACITY } from "../kit/mobileChat/useDeliverBrighten";
 import { useZenStore } from "./zenStore";
 import { RECENT_SENT_KEY, useRecentFirstStore } from "./recentFirst";
 import { fakeScope } from "../test/fakeScope";

@@ -130,6 +130,13 @@ export const SPRING_DECAY = 8;
 export const FLY_Z = 5;
 /** DEV-only override key (see the header). */
 export const SEND_FLY_DEBUG_KEY = "k2.debug.sendFly";
+/** The class that draws a lone bubble tail (the app's chatBubbles.css),
+ *  given `data-tail` and `--k2-bubble`. A surface with its own tail CSS
+ *  passes `tailClass` to runSendFly. */
+export const FLY_TAIL_CLASS = "zen-tail-solo";
+/** Where the bubble's words are (their font size sets the text's scale):
+ *  the app's markdown body. Falls back to the bubble itself. */
+export const FLY_TEXT_SELECTOR = ".chat-markdown";
 
 const SOFT_OUT = "cubic-bezier(0.22, 1, 0.36, 1)";
 /** Bubble padding (Bubble's `px-3 py-2`) when it cannot be read. */
@@ -544,6 +551,10 @@ export function runSendFly(opts: {
     run?: (dy: number, motion: FlyMotion) => () => void;
   };
   motion?: FlyMotion;
+  /** The lone-tail class for the shape's tail (default FLY_TAIL_CLASS). */
+  tailClass?: string;
+  /** The bubble's words, for their font size (default FLY_TEXT_SELECTOR). */
+  textSelector?: string;
 }): () => void {
   const { root, bubble, source, done } = opts;
   const motion = opts.motion ?? flyMotion();
@@ -589,7 +600,7 @@ export function runSendFly(opts: {
     endOpacity = num(bubble.style.opacity || cs.opacity, 1);
     const blue = cs.backgroundColor || "rgb(10, 132, 255)";
     const bubbleRadius = num(cs.borderTopLeftRadius) || num(bubble.style.borderRadius) || 18;
-    const bubbleFont = fontPxOf(bubble.querySelector(".chat-markdown") ?? bubble);
+    const bubbleFont = fontPxOf(bubble.querySelector(opts.textSelector ?? FLY_TEXT_SELECTOR) ?? bubble);
     const s = clampScale(source.fontPx / bubbleFont);
     const timing = { duration: motion.ms, fill: "both" as const };
     const blueAt = Math.min(Math.max(motion.blueAt, 0.05), 1);
@@ -637,11 +648,11 @@ export function runSendFly(opts: {
     shape.appendChild(fill);
     let tailEl: HTMLElement | null = null;
     if (tail) {
-      // The real bubble's tail (chatBubbles.css), riding the bottom-right
+      // The real bubble's tail (the app's tail CSS), riding the bottom-right
       // anchor; it grows in as the shape becomes a bubble.
       tailEl = document.createElement("div");
       tailEl.setAttribute("data-fly-part", "tail");
-      tailEl.className = "zen-tail-solo";
+      tailEl.className = opts.tailClass ?? FLY_TAIL_CLASS;
       tailEl.setAttribute("data-tail", tail);
       tailEl.style.setProperty("--k2-bubble", blue);
       shape.appendChild(tailEl);

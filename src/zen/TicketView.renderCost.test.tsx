@@ -36,8 +36,8 @@ vi.mock("../lib/useSessionIdentity", () => {
   const me = { username: "u", owner: false };
   return { useSessionIdentity: () => me };
 });
-vi.mock("./useDeliverBrighten", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("./useDeliverBrighten")>();
+vi.mock("../kit/mobileChat/useDeliverBrighten", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../kit/mobileChat/useDeliverBrighten")>();
   return {
     ...actual,
     useDeliverBrighten: (...args: Parameters<typeof actual.useDeliverBrighten>) => {

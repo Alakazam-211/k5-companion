@@ -23,7 +23,7 @@ import type { ThreadMessage } from "./threadModel";
 import { useZenStore } from "./zenStore";
 import { fakeScope } from "../test/fakeScope";
 import { setZenScope } from "../test/zenScopeMock";
-import { flyKeyframes } from "./sendFly";
+import { flyKeyframes } from "../kit/mobileChat/sendFly";
 import { __resetNetStatsForTests, netSummary } from "../lib/netStats";
 
 const msg = (id: string, text: string, mine = true): ThreadMessage => ({

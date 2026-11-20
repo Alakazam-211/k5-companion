@@ -20,7 +20,7 @@ import { PlusGlyph } from "./PlusGlyph";
 import { sidecarSuffix } from "./sidecarRows";
 import { AttachMenu, type AttachChoice, type AttachMenuExtra } from "./AttachMenu";
 import { useVoiceCall } from "./voice/voiceCall";
-import { alongCurve, curveEasing, flyMotion, prefersReducedMotion } from "./sendFly";
+import { alongCurve, curveEasing, flyMotion, prefersReducedMotion } from "../kit/mobileChat/sendFly";
 import { usePressSpring } from "../lib/usePressSpring";
 import {
   isUnsupportedPick,
