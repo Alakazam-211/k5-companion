@@ -15,6 +15,7 @@ import { shareCallLog } from "./sewVoice";
 import { useLiveVideo, VideoTile } from "./videoLayer";
 import { canJoinWithCamera, useVoiceCall, type CallRoom } from "./voiceCall";
 import { useVoiceNames } from "./voiceNames";
+import { useThemeStore } from "../../theme/themeStore";
 import { DM_ROOM_PREFIX } from "../../api/homeChatCallsPure";
 import { hostingStateText, meOffer, roomIsFull, type VoiceRoom, type VoiceRoomsList } from "./voiceWire";
 
@@ -248,6 +249,11 @@ export function VoiceRoomsOverlay({ onClose }: { onClose: () => void }) {
   // In a call the page is the call, at full height; to join another, leave
   // this one (Riley 2026-11-09).
   const inCall = useVoiceCall((s) => s.phase !== "idle" && !!s.room);
+  // The call screen is dark in every palette (Riley 2026-11-20: Veil left
+  // the header light and the call bar white under the kit's white text):
+  // Obsidian or Dusk, the keyboard and status bar too, while the call is on
+  // screen, as on the terminal.
+  useEffect(() => (inCall ? useThemeStore.getState().holdDark() : undefined), [inCall]);
   // A DM call's screen is named for the other person.
   const dmName = useVoiceCall((s) => (s.phase !== "idle" && s.room?.dm ? s.room.roomName : null));
   const [headerRef, headerPx] = useMeasuredHeight(VOICE_HEADER_PX);

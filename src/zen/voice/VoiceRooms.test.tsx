@@ -27,6 +27,7 @@ import { __resetPipForTests, __setTileSenderForTests, HIDDEN, onPipEvent, type T
 import type { CallShim } from "./callShim";
 import { __resetVoiceCallForTests, __setCallShimForTests, setPhoneVoiceEngine, useVoiceCall } from "./voiceCall";
 import { voiceServers, VoiceRoomsOverlay } from "./VoiceRooms";
+import { useThemeStore } from "../../theme/themeStore";
 
 const server = (id: string, nickname: string) =>
   ({ id, nickname, url: `https://${id}.k2.dev` }) as unknown as ServerEntry;
@@ -175,6 +176,23 @@ describe("voice rooms on the phone", () => {
     expect(screen.getByTestId("voice-done").getAttribute("aria-label")).toBe("Back");
     act(() => useVoiceCall.setState({ phase: "idle", room: null }));
     expect(screen.queryByTestId("voice-call-bar")).toBeNull();
+  });
+
+  it("a call holds the dark palette while on screen, in Veil too, and lets go when it ends or closes", async () => {
+    useServersStore.setState({ servers: [{ id: "s1", nickname: "skylab", url: "https://sew.example", username: "r", rememberPassword: false }], tokens: { s1: "t" }, activeServerId: "s1" } as never);
+    const room = { serverId: "s1", serverLabel: "skylab", roomId: "room-1", roomName: "Standup", limit: 25 };
+    const holds = () => useThemeStore.getState().darkHolds;
+    const before = holds();
+    const { unmount } = render(<VoiceRoomsOverlay onClose={() => {}} />);
+    expect(holds()).toBe(before);
+    act(() => useVoiceCall.setState({ phase: "connected", room, consent: null }));
+    expect(holds()).toBe(before + 1);
+    act(() => useVoiceCall.setState({ phase: "idle", room: null }));
+    expect(holds()).toBe(before);
+    act(() => useVoiceCall.setState({ phase: "connected", room, consent: null }));
+    expect(holds()).toBe(before + 1);
+    unmount();
+    expect(holds()).toBe(before);
   });
 
   it("shows a recording notice with the kit's answers, and sends the one picked", async () => {
