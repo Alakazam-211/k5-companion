@@ -104,6 +104,10 @@ export type NoiseRemovalState = {
   /** The last busy moment: `call_start`, `audio_session_activated`,
    *  `route_change`, `camera_start`, `app_scene_change` or `other`. */
   capture_stage_last_transient?: string;
+  /** How the Apple DSP thread is scheduled (Sew 0.11.2, kessel-audio 0.2.4):
+   *  `workgroup` (joined the audio unit's workgroup), `time_constraint`,
+   *  `qos` or `none` (off Apple). Absent until the pipeline reports. */
+  capture_stage_dsp_scheduling?: "workgroup" | "time_constraint" | "qos" | "none" | string;
   /** Anything a later plugin adds: the call log prints it too. */
   [field: string]: unknown;
 };

@@ -265,6 +265,7 @@ const NOISE_KNOWN = [
   "capture_stage_grace_blocks",
   "capture_stage_grace_over_budget",
   "capture_stage_last_transient",
+  "capture_stage_dsp_scheduling",
 ] as const;
 
 /** A field's value as the call log writes it: false, 0 and null too;
