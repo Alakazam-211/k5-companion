@@ -2065,7 +2065,7 @@ fn state_name(s: &CallState) -> String {
 /// A shim event (K2CallShim.swift): its name and the fields worth knowing.
 fn shim_line(event: &Value) -> String {
     let mut line = format!("system {}", code(event.get("event").and_then(Value::as_str).unwrap_or_default()));
-    for key in ["why", "route", "interface", "error"] {
+    for key in ["scene", "why", "route", "interface", "error"] {
         if let Some(v) = event.get(key).and_then(Value::as_str) {
             line.push_str(&format!(" {key}={}", code(v)));
         }
@@ -2410,6 +2410,7 @@ mod tests {
         let ev = json!({ "event": "start_failed", "error": "callkit: 3", "call": "UUID-1", "token": "tok" });
         assert_eq!(shim_line(&ev), "system start_failed error=callkit:3");
         assert_eq!(shim_line(&json!({ "event": "mute_requested", "muted": true })), "system mute_requested muted=true");
+        assert_eq!(shim_line(&json!({ "event": "app_scene", "scene": "foreground" })), "system app_scene scene=foreground");
         assert_eq!(outcome(Some(&refused("room_full", "x"))), "refused room_full");
         assert_eq!(outcome(Some(&ProviderError::Other("https://a.example".into()))), "failed");
 
