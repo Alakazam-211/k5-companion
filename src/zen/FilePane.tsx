@@ -43,8 +43,9 @@ import { workspaceHandleOf } from "./composerAttach";
 import { useBackHandler } from "../lib/androidBack";
 import { useMenuGlassFill } from "./AttachMenu";
 
-/** Drawer width. The tree needs more room than the old resource list. */
-export const FILE_PANE_PX = 224;
+/** Drawer width at most (both right drawers: `min(240px, 100vw - 72px)`,
+ *  RightDrawer's DRAWER_WIDTH). */
+export const FILE_PANE_PX = 240;
 
 const ICON_BTN = { width: 28, height: 28, color: "var(--color-text-primary)" } as const;
 
@@ -121,17 +122,19 @@ type NameSheet =
       scope: ServerScope;
     };
 
-export function FilePane() {
+/** `closing`: the drawer is sliding away (Zen keeps it mounted until the
+ *  slide ends); it still draws, but Back is no longer its. */
+export function FilePane({ closing = false }: { closing?: boolean }) {
   const open = useZenStore((s) => s.filesOpen);
-  if (!open) return null;
-  return <FilePaneOpen />;
+  if (!open && !closing) return null;
+  return <FilePaneOpen active={open && !closing} />;
 }
 
 /** Files drawer: header (title, hidden-files eye, new folder, close), Workspace
  *  Resources, then the workspace folder tree. Hold a row still for its
  *  menu (Copy Path, Rename, Add to / Remove from Workspace Resources);
  *  hold and move to drag a file into the chat. */
-function FilePaneOpen() {
+function FilePaneOpen({ active }: { active: boolean }) {
   const openFileIds = useZenStore((s) => s.openFileIds);
   const openFile = useZenStore((s) => s.openFile);
   const openFileFromPath = useZenStore((s) => s.openFileFromPath);
@@ -140,8 +143,11 @@ function FilePaneOpen() {
   const source = useZenStore((s) => s.fileSource);
   const fileError = useZenStore((s) => s.fileError);
   const files = allFiles.filter((f) => !f.linked);
+  const word = sourceWord(source);
   const heading =
-    source === "live" ? "Workspace Resources" : `${sourceWord(source)} resources`;
+    source === "live"
+      ? "Workspace Resources"
+      : `${word.charAt(0)}${word.slice(1).toLowerCase()} resources`;
 
   // Multi-server S3: the room's server. A drawer in a chat on server B
   // reads and writes B (tree, create, rename, resources), never the active one.
@@ -158,7 +164,9 @@ function FilePaneOpen() {
   const [newFile, setNewFile] = useState<{ scope: ServerScope; startDir: string } | null>(null);
   const drag = useFileDrag((s) => s.drag);
   // Android Back closes the drawer, like its glass X.
-  useBackHandler(true, toggleFiles);
+  useBackHandler(active, toggleFiles);
+  /** The list has scrolled: the header shows its rule. */
+  const [scrolled, setScrolled] = useState(false);
 
   // A project chat has several members' agents reading: the absolute
   // path, not one relative to the PoC's folder.
@@ -167,6 +175,8 @@ function FilePaneOpen() {
   );
   const hold = useFileHold({ refFor: (p) => fileRefText(p, isGroup ? null : root) });
   const { menu, closeMenu } = hold;
+  /** The row held for its menu: tinted like the open file. */
+  const heldPath = menu?.path ?? null;
 
   useEffect(
     () => () => {
@@ -243,12 +253,12 @@ function FilePaneOpen() {
   };
 
   return (
-    <aside
-      className="flex flex-col h-full min-h-0 border-l border-[var(--color-border)] bg-[var(--color-bg-surface)] shrink-0"
-      style={{ width: FILE_PANE_PX }}
-      aria-label="Files"
-    >
-      <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-11 border-b border-[var(--color-wash-2)]">
+    <aside className="flex flex-col h-full min-h-0 min-w-0" data-testid="files-drawer">
+      <div
+        className="k2-drawer-head shrink-0 flex items-center gap-1.5 pl-4 pr-2 h-12"
+        data-testid="files-head"
+        data-scrolled={scrolled ? "1" : undefined}
+      >
         <span className="flex-1 min-w-0 text-[15px] font-semibold text-[var(--color-text-primary)]" data-testid="files-title">
           Files
         </span>
@@ -296,9 +306,10 @@ function FilePaneOpen() {
       </div>
       <div
         ref={hold.scrollerRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 min-h-0 overflow-y-auto"
         style={{ overflowY: drag ? "hidden" : "auto", touchAction: drag ? "none" : undefined }}
         data-testid="files-scroll"
+        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 0)}
         onPointerDown={hold.onPointerDown}
         onPointerMove={hold.onPointerMove}
         onPointerUp={hold.onPointerUp}
@@ -308,15 +319,15 @@ function FilePaneOpen() {
         <button
           type="button"
           onClick={toggleResources}
-          className={`w-full flex items-center gap-1.5 px-3 pt-2 pb-1.5 text-left text-[10px] text-[var(--color-text-muted)] tracking-widest bg-transparent border-0 ${source === "live" ? "" : "uppercase"}`}
+          className="k2-drawer-heading w-full flex items-center gap-1.5 text-left bg-transparent border-0"
           aria-expanded={!resourcesCollapsed}
           aria-controls="files-resources-body"
           data-testid="resources-toggle"
           data-state={resourcesCollapsed ? "collapsed" : "expanded"}
         >
           <svg
-            width="9"
-            height="9"
+            width="10"
+            height="10"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -331,7 +342,7 @@ function FilePaneOpen() {
           </svg>
           <span className="min-w-0 truncate">{heading}</span>
           {resourceCount !== null ? (
-            <span className="shrink-0 tracking-normal tabular-nums opacity-70" data-testid="resources-count">
+            <span className="shrink-0 font-normal tabular-nums opacity-70" data-testid="resources-count">
               · {resourceCount}
             </span>
           ) : null}
@@ -339,21 +350,21 @@ function FilePaneOpen() {
         {resourcesCollapsed ? null : (
           <div id="files-resources-body" data-testid="resources-body" className="pb-1">
             {files.length === 0 && source === "live" ? (
-              <div className="k2-tile rounded-[14px] mx-2 mb-2 px-3 py-3" data-testid="resources-empty">
-                <div className="text-[12px] text-[var(--color-text-primary)] font-medium">
+              <div className="k2-tile k2-tile-raised rounded-[10px] mx-1.5 mb-2 px-2.5 py-3" data-testid="resources-empty">
+                <div className="text-[13px] text-[var(--color-text-primary)] font-medium">
                   {RESOURCES_EMPTY_TITLE}
                 </div>
-                <div className="mt-1 text-[11px] leading-4 text-[var(--color-text-muted)]">
+                <div className="mt-1 text-[12px] leading-4 text-[var(--color-text-muted)]">
                   {RESOURCES_EMPTY_LINE}
                 </div>
               </div>
             ) : files.length === 0 ? (
-              <div className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]">
+              <div className="px-4 py-2 text-[13px] text-[var(--color-text-muted)]">
                 {source === "loading" ? "loading" : asErrorText(fileError, "empty")}
               </div>
             ) : (
               files.map((f) => {
-                const active = openFileIds.includes(f.id);
+                const current = openFileIds.includes(f.id) || heldPath === f.id;
                 const sub = f.missing ? "Unavailable" : f.hint;
                 return (
                   <button
@@ -372,14 +383,11 @@ function FilePaneOpen() {
                     data-file-missing={f.missing ? "1" : "0"}
                     data-file-section="resources"
                     data-testid="resource-row"
+                    data-current={current ? "1" : undefined}
                     aria-label={f.name}
-                    className={`w-full flex items-start gap-1.5 text-left px-3 py-1.5 text-[12px] select-none ${
-                      f.missing
-                        ? "text-[var(--color-text-muted)]"
-                        : active
-                          ? "text-[var(--color-accent-text)]"
-                          : "text-[var(--color-text-primary)]"
-                    }`}
+                    className={`k2-drawer-row flex items-start gap-1.5 text-left px-2.5 py-[9px] min-h-[36px] text-[14px] select-none ${
+                      f.missing ? "text-[var(--color-text-muted)]" : "text-[var(--color-text-primary)]"
+                    } ${current ? "font-semibold" : ""}`}
                     style={{ WebkitTouchCallout: "none", WebkitUserSelect: "none", touchAction: "pan-y" }}
                   >
                     <span
@@ -400,7 +408,7 @@ function FilePaneOpen() {
                         className={f.missing ? "line-through" : ""}
                       />
                       {sub ? (
-                        <span className="truncate text-[10px] leading-[14px] text-[var(--color-text-muted)]">{sub}</span>
+                        <span className="truncate text-[12px] font-normal leading-4 text-[var(--color-text-muted)]">{sub}</span>
                       ) : null}
                     </span>
                   </button>
@@ -411,7 +419,7 @@ function FilePaneOpen() {
         )}
         <div
           role="separator"
-          className="mx-3 my-1 h-px"
+          className="mx-4 mt-2 mb-1 h-px"
           style={{ background: "var(--tile-edge, var(--color-border))" }}
           data-testid="resources-divider"
         />
@@ -421,12 +429,13 @@ function FilePaneOpen() {
               tree={tree}
               showHidden={showHidden}
               activeIds={openFileIds}
+              heldPath={heldPath}
               onOpenFile={(p) => openFileFromPath(p)}
               consumeSkipClick={hold.consumeSkipClick}
             />
           </div>
         ) : rootNote && source !== "stub" ? (
-          <div className="px-3 py-3 text-[11px] text-[var(--color-text-muted)]" data-testid="files-tree-note">
+          <div className="px-4 py-3 text-[12px] text-[var(--color-text-muted)]" data-testid="files-tree-note">
             {rootNote}
           </div>
         ) : null}
@@ -457,16 +466,15 @@ function FilePaneOpen() {
         : null}
 
       {root ? (
-        <div className="p-2 shrink-0" style={{ paddingBottom: "calc(8px + var(--safe-bottom))" }} data-testid="files-new">
+        <div className="k2-drawer-foot p-2 shrink-0" data-testid="files-new">
           <button
             type="button"
-            className="w-full flex items-center gap-2 text-left zen-glass zen-glass-round"
-            style={{ minHeight: 40, padding: "0 12px", color: "var(--color-text-primary)" }}
+            className="k2-drawer-button w-full flex items-center gap-2 text-left px-4"
             data-testid="files-new-toggle"
             onClick={() => mkdirTarget && setNewFile({ scope, startDir: mkdirTarget })}
           >
-            <PlusGlyph />
-            <span className="text-[13px]">New File</span>
+            <PlusGlyph color="var(--color-accent-text)" />
+            <span className="text-[14px]">New File</span>
           </button>
         </div>
       ) : null}

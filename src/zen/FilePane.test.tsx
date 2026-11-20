@@ -44,7 +44,7 @@ describe("FilePane stub markers", () => {
       openFileIds: [],
     });
     render(<FilePane />);
-    expect(screen.getByText("LOADING resources")).not.toBeNull();
+    expect(screen.getByText("Loading resources")).not.toBeNull();
     expect(screen.getByText("loading")).not.toBeNull();
     expect(screen.queryByText("Workspace Resources")).toBeNull();
     expect(screen.queryByText("empty")).toBeNull();

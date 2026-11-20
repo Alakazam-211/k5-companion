@@ -14,7 +14,8 @@ export type ChatterPhase = "armed" | "tracking" | "rejected";
 export const CHATTER_OPEN_TRANSFORM = "translateX(0px)";
 export const CHATTER_CLOSED_TRANSFORM = "translateX(100%)";
 export const CHATTER_SLIDE_MS = 280;
-export const CHATTER_TRANSITION = `transform ${CHATTER_SLIDE_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
+export const CHATTER_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+export const CHATTER_TRANSITION = `transform ${CHATTER_SLIDE_MS}ms ${CHATTER_EASE}`;
 
 /** Closed: a dominant leftward drag opens. Open: a dominant rightward drag
  *  closes. Anything else (vertical, the other way) is the list's touch. */

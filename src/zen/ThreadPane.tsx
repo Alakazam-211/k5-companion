@@ -1051,6 +1051,7 @@ export function ThreadPane({
   viewportInteractive = false,
   topInset,
   covered = false,
+  ariaHidden = false,
   roomBanner = null,
   roomQueuesInput = false,
   onComposerInput,
@@ -1066,6 +1067,8 @@ export function ThreadPane({
   topInset?: number;
   /** A full-screen overlay (file viewer) hides the Thread: not "viewing". */
   covered?: boolean;
+  /** A modal drawer is over the Thread: hidden from assistive tech. */
+  ariaHidden?: boolean;
   /** Multi-server room failure (MS36): shown above the composer; while
    *  set, input is off and the last messages stay. */
   roomBanner?: ReactNode;
@@ -2808,6 +2811,7 @@ export function ThreadPane({
       ref={rootRef}
       className="zen-thread-pane mchat-pane relative flex flex-col flex-1 min-h-0 min-w-0 overflow-x-hidden"
       style={{ fontFamily: "var(--zen-font)" }}
+      aria-hidden={ariaHidden || undefined}
     >
       <div
         ref={scrollerRef}

@@ -10,6 +10,7 @@ import { ChatsList } from "../zen/ChatsList";
 import { FilePane } from "../zen/FilePane";
 import { useFileDrag } from "../zen/fileDrag";
 import { SessionsPane } from "../zen/SessionsPane";
+import { RightDrawer } from "../zen/RightDrawer";
 import { useSwipeBack } from "../lib/useSwipeBack";
 import { useBackHandler } from "../lib/androidBack";
 import { FileStage } from "../zen/FileStage";
@@ -243,6 +244,14 @@ export function Zen() {
    *  mostly aside and fades so the composer under it is a drop target. */
   const fileDragging = useFileDrag((s) => s.drag !== null);
   const filesPaneOpen = filesOpen || viewingFile;
+
+  const closeSessions = () => {
+    setSessionsOpen(false);
+    setStartError(null);
+  };
+  /** A right drawer is up: the Thread under it is hidden from assistive
+   *  tech (the drawer is a modal dialog). */
+  const drawerUp = (filesOpen && !viewingFile) || (sessionsOpen && !groupChat);
 
   // A different chat closes the Sessions drawer (and the icon sheet).
   useEffect(() => {
@@ -939,6 +948,7 @@ export function Zen() {
                 type="button"
                 ref={pressFiles}
                 aria-label="Files"
+                data-testid="chat-files"
                 data-glass-shape="button"
                 className="flex items-center justify-center shrink-0 zen-glass zen-glass-pill"
                 style={{
@@ -965,6 +975,7 @@ export function Zen() {
               viewportMotion={viewportMotion}
               topInset={headerPx}
               covered={viewingFile}
+              ariaHidden={drawerUp}
               roomBanner={
                 room.failure ? <RoomBanner failure={room.failure} onAction={room.act} /> : null
               }
@@ -995,48 +1006,44 @@ export function Zen() {
               </PaneErrorBoundary>
             </div>
           ) : null}
-          {filesOpen && !viewingFile ? (
-            <div
-              className="absolute bottom-0 right-0 border-l border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col"
-              data-testid="file-pane"
-              data-dragging={fileDragging ? "1" : undefined}
-              style={{
-                top: "env(safe-area-inset-top)",
-                zIndex: 15,
-                opacity: fileDragging ? 0.4 : 1,
-                transform: fileDragging ? "translateX(72%)" : undefined,
-                transition: "transform 180ms ease, opacity 180ms ease",
-              }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <PaneErrorBoundary name="files">
-                <FilePane />
-              </PaneErrorBoundary>
-            </div>
-          ) : null}
-          {sessionsOpen && !groupChat ? (
-            <div
-              className="absolute bottom-0 right-0 border-l border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col"
-              data-testid="sessions-pane"
-              style={{ top: "env(safe-area-inset-top)", zIndex: 15 }}
-              onClick={(e) => e.stopPropagation()}
-            >
-              <PaneErrorBoundary name="sessions">
-                <SessionsPane
-                  agent={agent}
-                  onClose={() => {
-                    setSessionsOpen(false);
-                    setStartError(null);
-                  }}
-                  notice={startError}
-                  onOpenTerminal={(tid, title) => {
-                    rememberZenThread(agentId, roomServerId());
-                    openTerminal(tid, title);
-                  }}
-                />
-              </PaneErrorBoundary>
-            </div>
-          ) : null}
+          {/* The right drawers (K2 Design 2026-11-20): a floating tile
+              over a dim scrim (chat and header); a tap on the scrim, the
+              X, Back or a rightward swipe closes. Each stays mounted for
+              its closing slide. */}
+          <RightDrawer
+            open={filesOpen && !viewingFile}
+            label="Files"
+            testId="file-pane"
+            onClose={dismissFiles}
+            closeSelector='[data-testid="files-close"]'
+            returnFocusSelector='[data-testid="chat-files"]'
+            dragging={fileDragging}
+          >
+            <PaneErrorBoundary name="files">
+              <FilePane closing={!(filesOpen && !viewingFile)} />
+            </PaneErrorBoundary>
+          </RightDrawer>
+          <RightDrawer
+            open={sessionsOpen && !groupChat}
+            label="Sessions"
+            testId="sessions-pane"
+            onClose={closeSessions}
+            closeSelector='[data-testid="sessions-close"]'
+            returnFocusSelector='[data-testid="chat-sessions"]'
+          >
+            <PaneErrorBoundary name="sessions">
+              <SessionsPane
+                agent={agent}
+                active={sessionsOpen && !groupChat}
+                onClose={closeSessions}
+                notice={startError}
+                onOpenTerminal={(tid, title) => {
+                  rememberZenThread(agentId, roomServerId());
+                  openTerminal(tid, title);
+                }}
+              />
+            </PaneErrorBoundary>
+          </RightDrawer>
           {viewingFile ? (
             <div
               className="absolute bottom-0 right-0 w-[78%] border-l border-[var(--color-border)] bg-[var(--color-bg)] flex flex-col"

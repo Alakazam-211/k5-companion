@@ -898,6 +898,89 @@ html, body, #root {
   animation: k2-pulse 1.6s ease-out infinite;
 }
 
+/* The chat's right drawers (Sessions, Files; K2 Design 2026-11-20): a
+   floating .k2-tile over a plain dim (no blur), rows set apart by space
+   and a tinted current row instead of hairlines. Per palette: the float
+   shadow, the scrim and the current row's tint (not --color-selection:
+   Dusk's is blue). Obsidian's values are the default. */
+:root {
+  --drawer-shadow: var(--tile-sheen), 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --drawer-edge: var(--tile-edge);
+  --drawer-scrim: rgba(0, 0, 0, 0.4);
+  --drawer-current: rgba(64, 159, 255, 0.16);
+  --drawer-button-fill: var(--tile-raised);
+  --drawer-button-edge: var(--tile-edge);
+}
+:root[data-palette="yellow"] {
+  --drawer-shadow: var(--tile-sheen), 0 16px 40px rgba(6, 5, 3, 0.6), 0 2px 8px rgba(6, 5, 3, 0.4);
+  --drawer-scrim: rgba(6, 5, 3, 0.45);
+  --drawer-current: rgba(255, 199, 0, 0.14);
+}
+:root[data-palette="veil"] {
+  --drawer-shadow: 0 12px 32px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.06);
+  --drawer-edge: var(--color-border);
+  --drawer-scrim: rgba(20, 20, 30, 0.18);
+  --drawer-current: rgba(8, 106, 204, 0.1);
+  --drawer-button-fill: var(--color-bg-elevated);
+  --drawer-button-edge: var(--color-border);
+}
+/* After the light .k2-tile rule, and as specific: the drawer's own float. */
+:root .k2-tile.k2-drawer {
+  border-color: var(--drawer-edge);
+  box-shadow: var(--drawer-shadow);
+  border-radius: 16px;
+  overflow: hidden;
+}
+.k2-drawer-scrim {
+  background: var(--drawer-scrim);
+}
+/* The header's rule shows only once the list under it has scrolled. */
+.k2-drawer-head {
+  border-bottom: 1px solid transparent;
+}
+.k2-drawer-head[data-scrolled="1"] {
+  border-bottom-color: var(--color-wash-2);
+}
+/* Section headings: sentence case, normal tracking. */
+.k2-drawer-heading {
+  padding: 16px 16px 6px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+.k2-drawer-heading ~ .k2-drawer-heading {
+  padding-top: 20px;
+}
+/* A row: inset 6px from the tile, its words 16px from the edge. */
+.k2-drawer-row {
+  margin: 0 6px 2px;
+  width: calc(100% - 12px);
+  border-radius: 10px;
+  background: transparent;
+  transition: background-color 140ms ease;
+}
+.k2-drawer-row:active:not(:disabled):not([data-current="1"]) {
+  background: var(--color-wash-1);
+}
+.k2-drawer-row[data-current="1"] {
+  background: var(--drawer-current);
+}
+/* The footer's button (New session, New File): solid, not frost. */
+.k2-drawer-button {
+  min-height: 44px;
+  border-radius: 22px;
+  background: var(--drawer-button-fill);
+  border: 1px solid var(--drawer-button-edge);
+  color: var(--color-text-primary);
+}
+.k2-drawer-button:active:not(:disabled) {
+  background: var(--color-wash-1);
+}
+.k2-drawer-foot {
+  border-top: 1px solid var(--color-wash-2);
+}
+
 /* Auto reconnect: a small amber dot that breathes (rows of a server that
    is down), and a ring spinner (the room banner's "Reconnecting…"). */
 .k2-reconnect-dot {

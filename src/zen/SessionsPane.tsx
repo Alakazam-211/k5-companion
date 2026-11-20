@@ -81,16 +81,18 @@ function activityWord(a: RowActivity): string {
 
 function Status({ a }: { a: RowActivity | null }) {
   if (!a) return null;
+  const color = activityColor(a);
   return (
     <span
-      className="flex items-center gap-1 text-[10px] shrink-0"
-      style={{ color: activityColor(a) }}
+      className="flex items-center gap-1.5 text-[11px] leading-4 shrink-0"
+      style={{ color }}
       data-testid="session-activity"
     >
       <span
         aria-hidden
-        className="inline-block rounded-full"
-        style={{ width: 6, height: 6, background: activityColor(a) }}
+        className={`relative inline-block rounded-full shrink-0${a.display === "working" ? " k2-pulse" : ""}`}
+        style={{ width: 8, height: 8, background: color, color }}
+        data-testid="session-activity-dot"
       />
       {activityWord(a)}
     </span>
@@ -117,15 +119,25 @@ function Check() {
   );
 }
 
-const ROW =
-  "w-full flex items-center gap-2 text-left px-3 py-2 border-b border-[var(--color-wash-2)] bg-transparent";
-const HEADING = "px-3 pt-3 pb-1 text-[10px] tracking-widest text-[var(--color-text-muted)]";
+/** A row: inset 6px in the tile, 10px padding (words 16px from the edge),
+ *  rounded, 2px apart, no rules (.k2-drawer-row; K2 Design 2026-11-20). */
+const ROW = "k2-drawer-row flex items-center gap-2 text-left px-2.5 py-2 min-h-[44px]";
+const HEADING = "k2-drawer-heading";
+/** A row's title: 14px, 600 on the current row. */
+function titleClass(current: boolean, muted = false): string {
+  return `truncate text-[14px] leading-5 ${current ? "font-semibold" : "font-medium"} ${
+    muted ? "text-[var(--color-text-muted)]" : "text-[var(--color-text-primary)]"
+  }`;
+}
+const SUB = "truncate text-[12px] leading-4 text-[var(--color-text-muted)]";
+/** Empty and error lines: 13px, 16px from the tile's edge. */
+const LINE = "px-4 py-2 text-[13px] text-[var(--color-text-muted)]";
 
 function When({ at }: { at: number | null }) {
   const when = mountainTime(at);
   if (!when) return null;
   return (
-    <span className="truncate text-[10px] text-[var(--color-text-muted)]" data-testid="session-when">
+    <span className={SUB} data-testid="session-when">
       {when}
     </span>
   );
@@ -157,10 +169,7 @@ function WorkspaceNotify({
   const set = (v: boolean | null) =>
     void useNotifyPrefsStore.getState().setWorkspacePush(serverId, ws.projectId, v);
   return (
-    <div
-      className="px-3 py-2 border-b border-[var(--color-wash-2)]"
-      data-testid="workspace-notify"
-    >
+    <div className="pl-4 pr-2.5 pb-2" data-testid="workspace-notify">
       <div className="flex items-center gap-2">
         <span className="flex-1 min-w-0 truncate text-[12px] text-[var(--color-text-primary)]">
           Notifications for {name}
@@ -208,11 +217,14 @@ function WorkspaceNotify({
  *  header's Terminal button still reaches the PTY. */
 export function SessionsPane({
   agent,
+  active = true,
   onClose,
   onOpenTerminal,
   notice,
 }: {
   agent: StubAgent | undefined;
+  /** False while the drawer slides away (still mounted): Back is not its. */
+  active?: boolean;
   onClose: () => void;
   onOpenTerminal: (terminalId: string, title: string) => void;
   /** Why Terminal couldn't start the agent (shown above the list). */
@@ -221,7 +233,7 @@ export function SessionsPane({
   /** The room's server: the drawer lists, spawns and wakes on it (MA18). */
   const scope = useZenScope();
   // Android Back hides the drawer, like its glass X.
-  useBackHandler(true, onClose);
+  useBackHandler(active, onClose);
   const roomSessions = useRoomSessions(scope);
   const sessions = roomSessions.sessions;
   const agents = useZenStore((s) => s.agents);
@@ -252,6 +264,8 @@ export function SessionsPane({
   /** The reader has scrolled the list (no page loads on the first paint). */
   const userScrolled = useRef(false);
   const listRef = useRef<HTMLDivElement>(null);
+  /** The list has scrolled: the header shows its rule. */
+  const [scrolled, setScrolled] = useState(false);
   /** History row being woken (its addr), and the last wake failure. */
   const [waking, setWaking] = useState<string | null>(null);
   const [wakeError, setWakeError] = useState<{ addr: string; error: string } | null>(null);
@@ -541,41 +555,46 @@ export function SessionsPane({
   const canAdd = !!agent && !!path && !!handle && agent.kind !== "group" && !!llms && llms.length > 0;
 
   return (
-    <aside
-      className="flex flex-col h-full min-h-0 border-l border-[var(--color-border)] bg-[var(--color-bg-surface)] shrink-0"
-      style={{ width: 220 }}
-      aria-label="Sessions"
-      data-testid="sessions-drawer"
-    >
-      <div className="flex items-center gap-1.5 pl-3 pr-1.5 h-11 border-b border-[var(--color-wash-2)]">
-        <span className="flex-1 min-w-0 flex flex-col">
-          {/* Same title style as the Files drawer header. */}
-          <span className="truncate text-[15px] font-semibold text-[var(--color-text-primary)]">
-            Sessions
+    <aside className="flex flex-col h-full min-h-0 min-w-0" data-testid="sessions-drawer">
+      {/* Header (48px) and the workspace's bell: no rule at rest, a 1px
+          wash once the list under them has scrolled. */}
+      <div
+        className="k2-drawer-head shrink-0"
+        data-testid="sessions-head"
+        data-scrolled={scrolled ? "1" : undefined}
+      >
+        <div className="flex items-center gap-1.5 pl-4 pr-2 h-12">
+          <span className="flex-1 min-w-0 flex flex-col">
+            {/* Same title style as the Files drawer header. */}
+            <span className="truncate text-[15px] font-semibold text-[var(--color-text-primary)]">
+              Sessions
+            </span>
+            <ServerChip serverId={scope.id} testId="sessions-server" align="left" />
           </span>
-          <ServerChip serverId={scope.id} testId="sessions-server" align="left" />
-        </span>
-        <GlassCloseButton onClick={onClose} label="Hide sessions" testId="sessions-close" />
+          <GlassCloseButton onClick={onClose} label="Hide sessions" testId="sessions-close" />
+        </div>
+        {handle && agent?.kind !== "group" ? (
+          <WorkspaceNotify
+            handle={handle}
+            projectId={workspaceProjectId}
+            fallbackName={name}
+          />
+        ) : null}
       </div>
-      {handle && agent?.kind !== "group" ? (
-        <WorkspaceNotify
-          handle={handle}
-          projectId={workspaceProjectId}
-          fallbackName={name}
-        />
-      ) : null}
       <div
         ref={listRef}
-        className="flex-1 overflow-y-auto"
+        className="flex-1 min-h-0 overflow-y-auto pb-2"
         data-testid="sessions-list"
         onScroll={() => {
           userScrolled.current = true;
+          const el = listRef.current;
+          setScrolled(!!el && el.scrollTop > 0);
           loadMoreIfNear();
         }}
       >
         {notice ? (
           <p
-            className="mx-3 mt-2 text-[11px]"
+            className="mx-4 mt-2 text-[13px]"
             style={{ color: "var(--color-status-error-text)" }}
             role="alert"
             data-testid="sessions-start-error"
@@ -587,11 +606,18 @@ export function SessionsPane({
           {ACTIVE_HEADING}
         </div>
         {handle ? (
-          <button type="button" className={ROW} data-testid="session-row-main" onClick={pickMain}>
+          <button
+            type="button"
+            className={ROW}
+            data-testid="session-row-main"
+            data-current={currentAddr === handle ? "1" : undefined}
+            aria-current={currentAddr === handle || undefined}
+            onClick={pickMain}
+          >
             {iconFor(listed.mainTerminalId)}
             <span className="flex flex-col flex-1 min-w-0">
-              <span className="truncate text-[12px] text-[var(--color-text-primary)]">Main</span>
-              <span className="truncate text-[10px] text-[var(--color-text-muted)]">{handle}</span>
+              <span className={titleClass(currentAddr === handle)}>Main</span>
+              <span className={SUB}>{handle}</span>
               <Status
                 a={
                   path
@@ -603,127 +629,65 @@ export function SessionsPane({
             {currentAddr === handle ? <Check /> : null}
           </button>
         ) : null}
-        {listed.sidecars.map((side) => (
-          <button
-            key={side.addr}
-            type="button"
-            className={ROW}
-            data-testid="session-row-sidecar"
-            onClick={() => pickSide(side)}
-          >
-            {iconFor(side.terminalId, matchSidecarSession(side.addr, side.path, sessions))}
-            <span className="flex flex-col flex-1 min-w-0">
-              <span className="truncate text-[12px] text-[var(--color-text-primary)]">{side.addr}</span>
-              {side.chatTitle && side.chatTitle !== side.addr.split("/").slice(1).join("/") ? (
-                <span className="truncate text-[10px] text-[var(--color-text-muted)]">{side.chatTitle}</span>
-              ) : null}
-              <Status a={activityForRow(side, activity, true)} />
-            </span>
-            {currentAddr === side.addr ? <Check /> : null}
-          </button>
-        ))}
-        {terminalRows.map((t) => (
-          <button
-            key={t.terminalId}
-            type="button"
-            className={ROW}
-            data-testid="session-row-terminal"
-            data-thread-addr={t.addr || undefined}
-            disabled={!t.addr}
-            aria-disabled={!t.addr}
-            style={t.addr ? undefined : { opacity: 0.5 }}
-            onClick={() => pickTerminal(t)}
-          >
-            {iconFor(t.terminalId)}
-            <span className="flex flex-col flex-1 min-w-0">
-              <span className="truncate text-[12px] text-[var(--color-text-primary)]">{t.title}</span>
-              {t.addr ? (
-                t.addr.includes("/") ? (
-                  <span className="truncate text-[10px] text-[var(--color-text-muted)]">{t.addr}</span>
-                ) : null
-              ) : (
-                <span
-                  className="truncate text-[10px] text-[var(--color-text-muted)]"
-                  data-testid="session-no-thread"
-                >
-                  {live === null ? "loading" : NO_THREAD_HINT}
-                </span>
-              )}
-              <Status a={activityForRow({ terminalId: t.terminalId }, activity, true)} />
-            </span>
-            {t.addr && currentAddr === t.addr ? <Check /> : null}
-          </button>
-        ))}
-        {!hasOthers ? (
-          <div className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]" data-testid="sessions-empty">
-            {loading && sessions.length === 0 ? "loading" : SESSIONS_EMPTY}
-          </div>
-        ) : null}
-        {canAdd ? (
-          <div className="p-2" data-testid="sessions-new">
+        {listed.sidecars.map((side) => {
+          const current = currentAddr === side.addr;
+          return (
             <button
+              key={side.addr}
               type="button"
-              className="w-full flex items-center gap-2 text-left zen-glass zen-glass-round"
-              style={{ minHeight: 40, padding: "0 12px", color: "var(--color-text-primary)" }}
-              aria-expanded={addOpen}
-              data-testid="sessions-new-toggle"
-              disabled={!!pendingId}
-              onClick={() => {
-                setAddError(null);
-                setAddOpen((v) => !v);
-              }}
+              className={ROW}
+              data-testid="session-row-sidecar"
+              data-current={current ? "1" : undefined}
+              aria-current={current || undefined}
+              onClick={() => pickSide(side)}
             >
-              <PlusGlyph />
-              <span className="text-[13px]">{NEW_SESSION_LABEL}</span>
+              {iconFor(side.terminalId, matchSidecarSession(side.addr, side.path, sessions))}
+              <span className="flex flex-col flex-1 min-w-0">
+                <span className={titleClass(current)}>{side.addr}</span>
+                {side.chatTitle && side.chatTitle !== side.addr.split("/").slice(1).join("/") ? (
+                  <span className={SUB}>{side.chatTitle}</span>
+                ) : null}
+                <Status a={activityForRow(side, activity, true)} />
+              </span>
+              {current ? <Check /> : null}
             </button>
-            {addOpen ? (
-              <div
-                role="menu"
-                aria-label="Active LLMs"
-                className="mt-2 overflow-hidden zen-glass zen-glass-round"
-                data-testid="sessions-llm-list"
-              >
-                {llms!.map((llm) => {
-                  const busy = pendingId === llm.id;
-                  const terminalOnly = !canSidecar(llm.harness);
-                  return (
-                    <button
-                      key={llm.id}
-                      type="button"
-                      role="menuitem"
-                      className="w-full flex items-center gap-2 text-left px-3 py-2 bg-transparent border-b border-[var(--color-wash-2)] last:border-b-0"
-                      style={{ opacity: pendingId && !busy ? 0.4 : 1 }}
-                      disabled={!!pendingId}
-                      data-testid="sessions-llm"
-                      data-llm-id={llm.id}
-                      onClick={() => pickLlm(llm)}
-                    >
-                      <LlmIcon harness={llm.harness ?? llm.name} emoji={llm.emoji} />
-                      <span className="flex flex-col flex-1 min-w-0">
-                        <span className="truncate text-[12px] text-[var(--color-text-primary)]">
-                          {busy ? `Starting ${llm.name}…` : llm.name}
-                        </span>
-                        {terminalOnly ? (
-                          <span className="truncate text-[10px] text-[var(--color-text-muted)]">
-                            {OPENS_AS_TERMINAL}
-                          </span>
-                        ) : null}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-            {addError ? (
-              <p
-                className="mt-2 px-1 text-[11px]"
-                style={{ color: "var(--color-status-error-text)" }}
-                role="alert"
-                data-testid="sessions-new-error"
-              >
-                {addError}
-              </p>
-            ) : null}
+          );
+        })}
+        {terminalRows.map((t) => {
+          const current = !!t.addr && currentAddr === t.addr;
+          return (
+            <button
+              key={t.terminalId}
+              type="button"
+              className={ROW}
+              data-testid="session-row-terminal"
+              data-thread-addr={t.addr || undefined}
+              data-current={current ? "1" : undefined}
+              aria-current={current || undefined}
+              disabled={!t.addr}
+              aria-disabled={!t.addr}
+              onClick={() => pickTerminal(t)}
+            >
+              {iconFor(t.terminalId)}
+              <span className="flex flex-col flex-1 min-w-0">
+                {/* No thread: the full row, its words muted (no fade). */}
+                <span className={titleClass(current, !t.addr)}>{t.title}</span>
+                {t.addr ? (
+                  t.addr.includes("/") ? <span className={SUB}>{t.addr}</span> : null
+                ) : (
+                  <span className={SUB} data-testid="session-no-thread">
+                    {live === null ? "loading" : NO_THREAD_HINT}
+                  </span>
+                )}
+                <Status a={activityForRow({ terminalId: t.terminalId }, activity, true)} />
+              </span>
+              {current ? <Check /> : null}
+            </button>
+          );
+        })}
+        {!hasOthers ? (
+          <div className={LINE} data-testid="sessions-empty">
+            {loading && sessions.length === 0 ? "loading" : SESSIONS_EMPTY}
           </div>
         ) : null}
         <div className={HEADING} data-testid="sessions-history">
@@ -734,6 +698,7 @@ export function SessionsPane({
           const readOnly = wakePlanFor(h, llms).kind === "readonly";
           const failed = wakeError?.addr === h.addr ? wakeError.error : null;
           const emoji = h.harness && !llmIconSvg(h.harness) ? emojis[h.harness] ?? null : null;
+          const current = currentAddr === h.addr;
           return (
             <div key={h.addr} data-testid="session-history-item" data-thread-addr={h.addr}>
               <button
@@ -742,6 +707,8 @@ export function SessionsPane({
                 data-testid="session-row-history"
                 data-thread-addr={h.addr}
                 data-read-only={readOnly || undefined}
+                data-current={current ? "1" : undefined}
+                aria-current={current || undefined}
                 aria-busy={busy || undefined}
                 disabled={!!waking}
                 style={waking && !busy ? { opacity: 0.4 } : undefined}
@@ -749,13 +716,11 @@ export function SessionsPane({
               >
                 <LlmIcon harness={h.harness} emoji={emoji} />
                 <span className="flex flex-col flex-1 min-w-0">
-                  <span className="truncate text-[12px] text-[var(--color-text-primary)]">{h.title}</span>
-                  {h.label ? (
-                    <span className="truncate text-[10px] text-[var(--color-text-muted)]">{h.label}</span>
-                  ) : null}
+                  <span className={titleClass(current)}>{h.title}</span>
+                  {h.label ? <span className={SUB}>{h.label}</span> : null}
                   {busy ? (
                     <span
-                      className="truncate text-[10px] text-[var(--color-accent-text)]"
+                      className="truncate text-[12px] leading-4 text-[var(--color-accent-text)]"
                       data-testid="session-waking"
                     >
                       {WAKING}
@@ -766,13 +731,13 @@ export function SessionsPane({
                   {readOnly ? (
                     <>
                       <span
-                        className="truncate text-[10px] text-[var(--color-text-primary)]"
+                        className="truncate text-[12px] leading-4 text-[var(--color-text-primary)]"
                         data-testid="session-read-only"
                       >
                         {OPEN_READ_ONLY}
                       </span>
                       <span
-                        className="text-[10px] leading-snug text-[var(--color-text-muted)]"
+                        className="text-[11px] leading-snug text-[var(--color-text-muted)]"
                         data-testid="session-read-only-note"
                       >
                         {READ_ONLY_NOTE}
@@ -780,12 +745,12 @@ export function SessionsPane({
                     </>
                   ) : null}
                 </span>
-                {currentAddr === h.addr ? <Check /> : null}
+                {current ? <Check /> : null}
               </button>
               {failed ? (
-                <div className="px-3 pb-2 border-b border-[var(--color-wash-2)]">
+                <div className="px-4 pb-2">
                   <p
-                    className="text-[11px]"
+                    className="text-[13px]"
                     style={{ color: "var(--color-status-error-text)" }}
                     role="alert"
                     data-testid="session-wake-error"
@@ -794,7 +759,7 @@ export function SessionsPane({
                   </p>
                   <button
                     type="button"
-                    className="mt-1 text-[11px] text-[var(--color-accent-text)] bg-transparent p-0"
+                    className="mt-1 text-[13px] text-[var(--color-accent-text)] bg-transparent p-0"
                     data-testid="session-open-without-waking"
                     onClick={() => {
                       setWakeError(null);
@@ -809,10 +774,7 @@ export function SessionsPane({
           );
         })}
         {history.length === 0 && !historyError ? (
-          <div
-            className="px-3 py-2 text-[12px] text-[var(--color-text-muted)]"
-            data-testid="sessions-history-empty"
-          >
+          <div className={LINE} data-testid="sessions-history-empty">
             {historyLoading || chats === null ? "loading" : HISTORY_EMPTY}
           </div>
         ) : null}
@@ -820,11 +782,7 @@ export function SessionsPane({
             spinner while it does; a Retry line if it failed; nothing at
             the end. */}
         {historyError ? (
-          <div
-            className="px-3 py-2 text-[12px] text-[var(--color-text-muted)] text-center"
-            data-testid="sessions-history-error"
-            role="alert"
-          >
+          <div className={`${LINE} text-center`} data-testid="sessions-history-error" role="alert">
             {HISTORY_MORE_ERROR} ·{" "}
             <button
               type="button"
@@ -854,6 +812,72 @@ export function SessionsPane({
           </div>
         ) : null}
       </div>
+      {/* New session: a footer pinned at the drawer's bottom (it doesn't
+          scroll away); its LLM menu opens upward over the list. */}
+      {canAdd ? (
+        <div className="k2-drawer-foot relative shrink-0 p-2" data-testid="sessions-new">
+          {addOpen ? (
+            <div
+              role="menu"
+              aria-label="Active LLMs"
+              className="absolute left-2 right-2 k2-tile k2-tile-raised overflow-y-auto"
+              style={{ bottom: "calc(100% + 8px)", borderRadius: 12, maxHeight: "min(60vh, 320px)", zIndex: 1 }}
+              data-testid="sessions-llm-list"
+            >
+              {llms!.map((llm) => {
+                const busy = pendingId === llm.id;
+                const terminalOnly = !canSidecar(llm.harness);
+                return (
+                  <button
+                    key={llm.id}
+                    type="button"
+                    role="menuitem"
+                    className="w-full flex items-center gap-2 text-left px-3 py-1.5 min-h-[44px] bg-transparent active:bg-[var(--color-wash-1)]"
+                    style={{ opacity: pendingId && !busy ? 0.4 : 1 }}
+                    disabled={!!pendingId}
+                    data-testid="sessions-llm"
+                    data-llm-id={llm.id}
+                    onClick={() => pickLlm(llm)}
+                  >
+                    <LlmIcon harness={llm.harness ?? llm.name} emoji={llm.emoji} />
+                    <span className="flex flex-col flex-1 min-w-0">
+                      <span className="truncate text-[14px] leading-5 text-[var(--color-text-primary)]">
+                        {busy ? `Starting ${llm.name}…` : llm.name}
+                      </span>
+                      {terminalOnly ? <span className={SUB}>{OPENS_AS_TERMINAL}</span> : null}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          {addError ? (
+            <p
+              className="mb-2 px-2 text-[13px]"
+              style={{ color: "var(--color-status-error-text)" }}
+              role="alert"
+              data-testid="sessions-new-error"
+            >
+              {addError}
+            </p>
+          ) : null}
+          <button
+            type="button"
+            className="k2-drawer-button w-full flex items-center gap-2 text-left px-4"
+            aria-expanded={addOpen}
+            aria-haspopup="menu"
+            data-testid="sessions-new-toggle"
+            disabled={!!pendingId}
+            onClick={() => {
+              setAddError(null);
+              setAddOpen((v) => !v);
+            }}
+          >
+            <PlusGlyph color="var(--color-accent-text)" />
+            <span className="text-[14px]">{NEW_SESSION_LABEL}</span>
+          </button>
+        </div>
+      ) : null}
     </aside>
   );
 }

@@ -113,9 +113,23 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-const ROW_CLASS =
-  "w-full flex items-center gap-1.5 text-left text-[12px] py-[7px] pr-2 select-none";
+/** A row: inset 6px in the drawer tile, rounded, 36px tall, 14px names
+ *  (.k2-drawer-row; K2 Design 2026-11-20). */
+const ROW_BOX = "k2-drawer-row flex items-center gap-1.5 text-left py-2 pr-2.5 min-h-[36px] select-none";
+const ROW_CLASS = `${ROW_BOX} text-[14px] leading-5`;
+/** The workspace folder's name over the tree: 12px/600 muted. */
+const ROOT_CLASS = `${ROW_BOX} text-[12px] leading-4 font-semibold text-[var(--color-text-muted)]`;
 const ROW_STYLE = { WebkitTouchCallout: "none", WebkitUserSelect: "none" } as const;
+/** Each level indents this much; depth 0 starts 10px in (16px from the tile). */
+export const TREE_INDENT_PX = 14;
+const ROW_PAD_PX = 10;
+/** A row's left padding at `depth` (inside its 6px inset). */
+export function treeRowPad(depth: number): number {
+  return ROW_PAD_PX + depth * TREE_INDENT_PX;
+}
+/** Hints (loading, errors, Empty, N more): 12px muted, on the row grid. */
+const HINT_CLASS = "py-1 pr-4 text-[12px] text-[var(--color-text-muted)]";
+const hintPad = (depth: number) => ({ paddingLeft: 6 + treeRowPad(depth) });
 
 /** The workspace folder/file tree. Rows carry `data-file-*` for the
  *  drawer's hold gesture (menu / drag); taps open files and toggle folders. */
@@ -123,12 +137,15 @@ export function FileTree({
   tree,
   showHidden,
   activeIds,
+  heldPath = null,
   onOpenFile,
   consumeSkipClick,
 }: {
   tree: FileTreeModel;
   showHidden: boolean;
   activeIds: string[];
+  /** The row held for its menu: tinted like the open file. */
+  heldPath?: string | null;
   onOpenFile: (path: string) => void;
   consumeSkipClick: () => boolean;
 }) {
@@ -139,22 +156,14 @@ export function FileTree({
     const st = dirs[dir];
     if (!st || (st.status === "loading" && st.entries.length === 0)) {
       return (
-        <div
-          className="py-1 text-[11px] text-[var(--color-text-muted)]"
-          style={{ paddingLeft: 10 + depth * 12 }}
-          data-testid="tree-loading"
-        >
+        <div className={HINT_CLASS} style={hintPad(depth)} data-testid="tree-loading">
           loading
         </div>
       );
     }
     if (st.status === "error") {
       return (
-        <div
-          className="py-1 pr-2 text-[11px] text-[var(--color-text-muted)] break-words"
-          style={{ paddingLeft: 10 + depth * 12 }}
-          data-testid="tree-error"
-        >
+        <div className={`${HINT_CLASS} break-words`} style={hintPad(depth)} data-testid="tree-error">
           {st.error}
         </div>
       );
@@ -162,10 +171,7 @@ export function FileTree({
     const rows = treeEntries(st.entries, showHidden);
     if (rows.length === 0) {
       return (
-        <div
-          className="py-1 text-[11px] text-[var(--color-text-muted)]"
-          style={{ paddingLeft: 10 + depth * 12 }}
-        >
+        <div className={HINT_CLASS} style={hintPad(depth)}>
           Empty
         </div>
       );
@@ -176,20 +182,21 @@ export function FileTree({
         {shown.map((e) => {
           const open = e.isDirectory && expanded.has(e.path);
           const dim = isHiddenName(e.name) || isHeavyDir(e);
-          const active = !e.isDirectory && activeIds.includes(e.path);
+          const current = (!e.isDirectory && activeIds.includes(e.path)) || heldPath === e.path;
           const sel = e.isDirectory && selected === e.path;
           return (
             <div key={e.path} role="treeitem" aria-expanded={e.isDirectory ? open : undefined}>
               <button
                 type="button"
-                className={ROW_CLASS}
+                className={`${ROW_CLASS}${current ? " font-semibold" : ""}`}
                 style={{
                   ...ROW_STYLE,
-                  paddingLeft: 6 + depth * 12,
+                  paddingLeft: treeRowPad(depth),
                   touchAction: "pan-y",
-                  background: sel ? "var(--color-row-hover)" : undefined,
-                  color: active ? "var(--color-accent-text)" : dim ? "var(--color-text-muted)" : "var(--color-text-primary)",
+                  background: sel && !current ? "var(--color-row-hover)" : undefined,
+                  color: dim && !current ? "var(--color-text-muted)" : "var(--color-text-primary)",
                 }}
+                data-current={current ? "1" : undefined}
                 data-file-path={e.path}
                 data-file-name={e.name}
                 data-file-dir={e.isDirectory ? "1" : "0"}
@@ -216,11 +223,7 @@ export function FileTree({
           );
         })}
         {rows.length > shown.length ? (
-          <div
-            className="py-1 text-[11px] text-[var(--color-text-muted)]"
-            style={{ paddingLeft: 10 + depth * 12 }}
-            data-testid="tree-more"
-          >
+          <div className={HINT_CLASS} style={hintPad(depth)} data-testid="tree-more">
             {rows.length - shown.length} more
           </div>
         ) : null}
@@ -232,8 +235,8 @@ export function FileTree({
     <div role="tree" aria-label="Workspace files" data-testid="file-tree">
       <button
         type="button"
-        className={`${ROW_CLASS} pl-2 text-[var(--color-text-muted)]`}
-        style={ROW_STYLE}
+        className={ROOT_CLASS}
+        style={{ ...ROW_STYLE, paddingLeft: treeRowPad(0) }}
         data-testid="tree-root"
         aria-label={`${baseName(root)} (workspace folder)`}
         title={root}
@@ -242,7 +245,7 @@ export function FileTree({
         <span className="shrink-0 flex items-center">
           <FolderIcon open />
         </span>
-        <MiddleEllipsis text={baseName(root)} className="flex-1 text-[11px] tracking-wide" />
+        <MiddleEllipsis text={baseName(root)} className="flex-1" />
       </button>
       {renderDir(root, 0)}
     </div>
