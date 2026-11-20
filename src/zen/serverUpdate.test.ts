@@ -358,7 +358,7 @@ describe("check", () => {
     expect(confirmCopy("Home", "home.k2.dev", "0.46.1", "standalone").confirmLabel).toBe("Download & install");
     const c = confirmCopy("Home", "home.k2.dev", "0.46.1", "standalone");
     expect(c.title).toBe("Update Home to 0.46.1?");
-    expect(c.message).toContain("on Home (home.k2.dev) — the REMOTE machine");
+    expect(c.message).toContain("on Home (home.k2.dev), the server you're connected to");
   });
 });
 

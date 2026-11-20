@@ -230,8 +230,13 @@ export function forbiddenCopy(host: string): string {
 
 export const AIRGAP_NOTE = "Updates are off on this server (air-gap is on).";
 
-export const AGENTS_WARNING =
-  "Running agents on this server will be stopped and restarted. Anything they're in the middle of will be interrupted.";
+/** Updates don't interrupt agents any more (K2's "Agents keep running
+ *  through updates and restarts", on by default; Riley 2026-11-19: the old
+ *  "will be stopped and restarted" warning is wrong now). The server only
+ *  reports the switch to dev builds, so the one exception is a plain note,
+ *  in desktop's words for the setting. */
+export const AGENTS_NOTE =
+  "Agents restart only if \"Agents keep running through updates and restarts\" is off in K2's Settings.";
 
 /** UH:269-287. `hostname` is shown only when it differs from the label. */
 export function confirmCopy(
@@ -244,10 +249,10 @@ export function confirmCopy(
   return {
     title: `Update ${host} to ${latest}?`,
     message:
-      `This will install ${latest} on ${where} — the REMOTE machine you're ` +
-      `connected to, not this phone — and restart it. Active sessions on it ` +
-      `will briefly disconnect, then reconnect automatically when it's back ` +
-      `on the new version. Continue?`,
+      `This installs ${latest} on ${where}, the server you're connected to ` +
+      `(not this phone), and restarts K2 there. Agents keep running through ` +
+      `it. This app disconnects for a few seconds, then reconnects on the new ` +
+      `version.`,
     confirmLabel: installKind === "bundled-app" ? "Update Host" : "Download & install",
   };
 }

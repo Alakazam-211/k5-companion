@@ -5,7 +5,7 @@ import { useBackHandler } from "../lib/androidBack";
 import { openExternal } from "../lib/openExternal";
 import { hostLabel, useServersStore } from "../stores/servers";
 import {
-  AGENTS_WARNING,
+  AGENTS_NOTE,
   AIRGAP_NOTE,
   availableCopy,
   confirmCopy,
@@ -396,23 +396,11 @@ function ConfirmSheet({
         <h2 className="text-[17px] font-semibold text-center" data-testid="server-update-confirm-title">
           {copy.title}
         </h2>
-        <div
-          role="alert"
-          className="text-[15px] font-semibold"
-          style={{
-            padding: "10px 12px",
-            borderRadius: 10,
-            background: "rgba(245,158,11,.14)",
-            border: "1px solid var(--color-status-warn)",
-            color: "var(--color-status-warn-text)",
-            lineHeight: 1.35,
-          }}
-          data-testid="server-update-confirm-warning"
-        >
-          {AGENTS_WARNING}
-        </div>
         <p className="text-[13px]" style={{ color: MUTED, lineHeight: 1.4 }} data-testid="server-update-confirm-body">
           {copy.message}
+        </p>
+        <p className="text-[12px]" style={{ color: MUTED, lineHeight: 1.4 }} data-testid="server-update-confirm-note">
+          {AGENTS_NOTE}
         </p>
         <div className="flex" style={{ gap: 10 }}>
           <button
