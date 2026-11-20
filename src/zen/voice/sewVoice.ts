@@ -4,6 +4,7 @@ import { isIosWebView } from "../../lib/nativePicker";
 import { shareOrSaveBytes, type ShareOutcome } from "../files/shareFile";
 import type { CameraAsk, ConsentSheet, EngineEvents, EngineNow, PhoneVoiceEngine, SelfFlags } from "./voiceCall";
 import { nativeJoinErrorCode } from "./voiceWire";
+import { onPluginParticipants, onPluginState, onRecordingControls, onRecordingEvent } from "./callRecording";
 import { applyNoiseRemoval, type NoiseRemovalState } from "./noiseRemoval";
 
 // The call engine in this build (iOS): Sew's native voice plugin, in Rust
@@ -13,8 +14,11 @@ import { applyNoiseRemoval, type NoiseRemovalState } from "./noiseRemoval";
 //   - events `sew-voice://state` (the call), `sew-voice://participants`
 //     (your own mute and deafen, which the system's button or a moderator
 //     can change; the call tile's buttons send `mute {muted?, deafened?}`),
-//     `k2-voice://consent` (the recording notice, already in the kit's words)
-//     and `k2-voice://video` (the call has video: Sew's `video_changed`);
+//     `k2-voice://consent` (the recording notice's facts, which the page
+//     words as K2's own notice: OK or leave), `k2-voice://video` (the call
+//     has video: Sew's `video_changed`), and `sew-voice://recording` /
+//     `sew-voice://recording_controls` for Record and Stop
+//     (callRecording.ts);
 //   - "Join with camera": `camera_permission` / `request_camera_permission`
 //     (the plugin never prompts on its own), then K2's `voice_join_camera`
 //     (Sew's `join_with`: CallKit starts a video call);
@@ -106,25 +110,22 @@ export function listenDmCallIds(fn: (ids: NativeDmCallIds | null) => void): () =
   };
 }
 
+/** Rust's `k2-voice://consent` sheet (voice.rs `consent_sheet`, its own
+ *  camelCase JSON, not the plugin's): the notice's facts, which the page
+ *  words as K2's own notice (K2 0.46.11). */
 export function parseConsentSheet(body: unknown): ConsentSheet | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-  if (typeof b.title !== "string" || typeof b.text !== "string" || typeof b.noticeVersion !== "number") return null;
-  const choices = Array.isArray(b.choices)
-    ? b.choices.flatMap((c) => {
-        const x = c && typeof c === "object" ? (c as Record<string, unknown>) : {};
-        if (typeof x.label !== "string") return [];
-        return [{ label: x.label, granted: typeof x.granted === "boolean" ? x.granted : null }];
-      })
-    : [];
-  if (choices.length === 0) return null;
+  if (typeof b.noticeVersion !== "number") return null;
   return {
     ask: b.ask === "join" ? "join" : "in_call",
     ...(typeof b.recordingId === "string" ? { recordingId: b.recordingId } : {}),
     noticeVersion: b.noticeVersion,
-    title: b.title,
-    text: b.text,
-    choices,
+    startedByName: typeof b.startedByName === "string" && b.startedByName.trim() ? b.startedByName : null,
+    required: b.required === true,
+    audioKeepDays: typeof b.audioKeepDays === "number" && b.audioKeepDays >= 0 ? b.audioKeepDays : 0,
+    appReaders: Array.isArray(b.appReaders) ? b.appReaders.filter((x): x is string => typeof x === "string") : [],
+    agentReaders: b.agentReaders === true,
   };
 }
 
@@ -316,6 +317,7 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
   function follow(): Promise<UnlistenFn[]> {
     listening ??= Promise.all([
       listen<StatePayload>("sew-voice://state", ({ payload }) => {
+        onPluginState(payload);
         const s = payload?.state;
         if (s === "connecting" || s === "connected" || s === "reconnecting") events?.onState(s);
         else if (s === "consent_required") events?.onState("held");
@@ -326,6 +328,9 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
       }),
       listen<unknown>("k2-voice://consent", ({ payload }) => events?.onConsent?.(parseConsentSheet(payload))),
       listen<unknown>("k2-voice://video", ({ payload }) => events?.onVideo?.(payload === true)),
+      // Record and Stop (K2 0.46.11): callRecording.ts follows these.
+      listen<unknown>("sew-voice://recording", ({ payload }) => onRecordingEvent(payload)),
+      listen<unknown>("sew-voice://recording_controls", ({ payload }) => onRecordingControls(payload)),
       listen<NoiseRemovalState>("sew-voice://noise_removal", ({ payload }) => noteNoise(payload)),
       // Each join's (and re-join's) K2 call id: for session/leave.
       listen<unknown>("k2-voice://dm-call", ({ payload }) => {
@@ -333,6 +338,7 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
         if (ids) events?.onCallId?.(ids.room, ids.callId);
       }),
       listen<Row[]>("sew-voice://participants", ({ payload }) => {
+        onPluginParticipants(payload);
         const me = Array.isArray(payload) ? payload.find((p) => p?.is_self) : undefined;
         if (me) events?.onSelfMute?.(me.muted === true || me.deafened === true, selfFlags(me));
       }),

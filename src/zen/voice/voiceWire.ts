@@ -85,6 +85,9 @@ export interface VoiceRoomsList {
   feedLive: boolean;
   /** This login's own call on this server (K2 0.46.9, phone voice). */
   me: VoiceMe | null;
+  /** An agent on this server may read its rooms' transcripts (K2
+   *  0.46.11): the recording notice says so. */
+  agentReaders: boolean;
 }
 
 /** `me` on `/cli/voice/rooms`. Never claimed live: Sew's presence lags
@@ -202,6 +205,7 @@ export function parseVoiceRooms(body: unknown): VoiceRoomsList {
     canManage?: unknown;
     feed?: unknown;
     me?: unknown;
+    agentReaders?: unknown;
   };
   return {
     hosting: parseHosting(b.hosting),
@@ -210,6 +214,7 @@ export function parseVoiceRooms(body: unknown): VoiceRoomsList {
     canManage: b.canManage === true,
     feedLive: b.feed === "live",
     me: parseMe(b.me),
+    agentReaders: b.agentReaders === true,
   };
 }
 
@@ -519,4 +524,118 @@ export function hostingStateText(h: VoiceHosting): string | null {
  *  "unavailable". */
 export function isLaneReconnecting(h: VoiceHosting): boolean {
   return h.state === "voice_lane_reconnecting";
+}
+
+// ── Recording (K2 0.46.11; plugin 0.9.1, Sew 0.11.1) ─────────────────
+// Ported from K2 desktop's recording-controls.ts and voice-core.ts so both
+// clients say the same.
+
+/** `set_recording_rights`' arguments (tauri-plugin-sew-voice 0.6.1+,
+ *  unchanged through 0.9.1), exactly as the daemon read them: K2 adds no
+ *  rule of its own. A flag left out reads `false` in the plugin. */
+export interface RecordingRights {
+  room: string;
+  my_perms: string;
+  dm: boolean;
+  recording_enabled?: boolean;
+  recording_dm_enabled?: boolean;
+  record_capped: boolean;
+  agent: boolean;
+}
+
+/** `POST /cli/voice/recording/controls {room}`: the rights to hand the
+ *  plugin, or none (a Voice & Chat only login never records). `recordCalls`
+ *  and `manageChannels` are for the call log only: the plugin decides. */
+export interface RecordingControlsAnswer {
+  rights: RecordingRights | null;
+  voiceChatOnly: boolean;
+  agentReaders: boolean;
+  recordCalls: boolean;
+  manageChannels: boolean;
+}
+
+export function parseRecordingControlsAnswer(body: unknown, roomId: string): RecordingControlsAnswer {
+  if (!body || typeof body !== "object") throw new Error("voice/recording/controls: not an answer");
+  const v = body as Record<string, unknown>;
+  const r = v.rights && typeof v.rights === "object" ? (v.rights as Record<string, unknown>) : null;
+  const rights: RecordingRights | null =
+    r && typeof v.myPerms === "string"
+      ? {
+          room: roomId,
+          my_perms: v.myPerms,
+          dm: r.dm === true,
+          ...(typeof r.recordingEnabled === "boolean" ? { recording_enabled: r.recordingEnabled } : {}),
+          ...(typeof r.recordingDmEnabled === "boolean" ? { recording_dm_enabled: r.recordingDmEnabled } : {}),
+          record_capped: r.recordCapped === true,
+          agent: r.agent === true,
+        }
+      : null;
+  return {
+    rights,
+    voiceChatOnly: v.voiceChatOnly === true,
+    agentReaders: v.agentReaders === true,
+    recordCalls: v.recordCalls === true,
+    manageChannels: v.manageChannels === true,
+  };
+}
+
+/** The facts of a recording notice (K2's own for its rooms: OK or leave). */
+export interface RecordingNoticeFacts {
+  ask: "join" | "in_call";
+  startedByName: string | null;
+  required: boolean;
+  /** 0 = deleted once the transcript is final. */
+  audioKeepDays: number;
+  appReaders: string[];
+  agentReaders: boolean;
+}
+
+/** K2's own line when an agent on this server may read its rooms' transcripts. */
+export const AGENT_READERS_LINE = "Agents on this server may read the transcript.";
+
+/** K2's notice for its rooms: who started it, what is kept and how long,
+ *  who reads it, and that staying means being recorded. */
+export function recordingNoticeText(
+  roomName: string,
+  n: RecordingNoticeFacts,
+  agentReaders: boolean
+): { title: string; lines: string[]; ok: string; leave: string } {
+  const lines: string[] = [];
+  if (n.startedByName) lines.push(`${n.startedByName} started recording this call.`);
+  else if (n.required) lines.push("This room records every call with more than one person.");
+  else lines.push("This room records its calls.");
+  lines.push("Everyone's voice is recorded and transcribed. The transcript is kept in this room's chat.");
+  lines.push(
+    n.audioKeepDays === 0
+      ? "The audio is deleted once the transcript is final."
+      : `The audio is kept for ${n.audioKeepDays} ${n.audioKeepDays === 1 ? "day" : "days"}.`
+  );
+  if (n.appReaders.length > 0) lines.push(`${n.appReaders.join(", ")} can read the transcript.`);
+  if (agentReaders || n.agentReaders) lines.push(AGENT_READERS_LINE);
+  lines.push(n.ask === "join" ? "Joining means being recorded." : "Staying in the call means being recorded.");
+  return {
+    title: n.ask === "join" ? `${roomName} is being recorded` : "This call is being recorded",
+    lines,
+    ok: "OK",
+    leave: n.ask === "join" ? "Don't join" : "Leave call",
+  };
+}
+
+/** A refused Record or Stop, in K2 desktop's words. */
+export function recordingErrorText(what: "start" | "stop", code: string): string {
+  if (code === "recording_required")
+    return "This room records every call with more than one person, so its recording keeps going while two or more are here.";
+  if (code === "recording_active") return "This call is already being recorded.";
+  if (code === "recording_disabled") return "Recording is off on this server.";
+  if (code === "not_in_call") return "That call ended.";
+  return what === "start" ? "K2 couldn't start recording this call." : "K2 couldn't stop the recording.";
+}
+
+/** Sew's `record_unavailable` hint (plugin 0.7.0): Record is allowed but
+ *  would be refused for now. Null: no hint. */
+export function recordUnavailableText(hint: string | null): string | null {
+  if (!hint) return null;
+  if (hint === "recording_capacity") return "Recording is busy on this server right now. Try again in a little while.";
+  if (hint === "recorder_unavailable") return "The recorder isn't available right now. Try again in a little while.";
+  return "Recording isn't available right now.";
 }

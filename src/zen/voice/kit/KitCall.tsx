@@ -17,12 +17,22 @@ import { createPortal } from "react-dom";
 import type { Member } from "@sew/client/proto";
 import { CallBar, CallView, useVoice, VoiceProvider, type HostTileInfo, type VoiceUi } from "@sew/voice";
 import { useServersStore } from "../../../stores/servers";
-import { useCallDuration } from "../callDuration";
+import { useCallDuration, useElapsedSince } from "../callDuration";
+import { Circle, CircleStop } from "lucide-react";
+import { scopeFor } from "../../../api/scope";
+import { subscribeAppEvents } from "../../ticketEvents";
+import {
+  readRecordingRights,
+  recordingButtons,
+  recordingCommand,
+  useCallRecording,
+} from "../callRecording";
+import { isAccessChanged } from "../voiceApi";
 import { serverDisplayName } from "../../homeView";
 import { LayerSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
 import { useVoiceCall, type CallRoom } from "../voiceCall";
 import { occupantByMember, roomByKey, useVoiceNames } from "../voiceNames";
-import type { VoiceRoom } from "../voiceWire";
+import { recordUnavailableText, type VoiceRoom } from "../voiceWire";
 import type { LayerVideo } from "./layerVideo";
 import { kitChannelId, kitRoomOf, kitSelfId, note, sewKit } from "./sewKit";
 
@@ -45,8 +55,14 @@ import { kitChannelId, kitRoomOf, kitSelfId, note, sewKit } from "./sewKit";
 // kit's RecordingConsent is never placed), and the floating call tile
 // outside the call screen (callTile.tsx).
 //
-// Hidden until K2 passes Sew's API through and a gateway feeds the store:
-// RecordingBadge/RecordingControls (need the store), VoiceChannelMembers
+// Record and Stop are the phone's own RecordingRow under the bar, not the
+// kit's RecordingBadge/RecordingControls: those read Sew's store and call
+// Sew's API (`/channels/{id}/recording/start`) through the host's `send`,
+// which the phone doesn't have (K2's door passes only the call-credential
+// routes), and never read the plugin's `recording_controls`. The row
+// follows the plugin and presses Record and Stop through it, so K2 posts
+// them with the phone's own login (callRecording.ts). Hidden until K2
+// passes Sew's API through and a gateway feeds the store: VoiceChannelMembers
 // (not placed). The screen button shows once the broadcast extension's ring
 // is armed for the call (layerVideo.ts). The bar's device check opens the
 // webview's own mic prompt, so its button is hidden and never answers here
@@ -254,6 +270,91 @@ function BarTime({ scope }: { scope: RefObject<HTMLElement | null> }) {
   return time ? createPortal(`\u00a0· ${time}`, slot) : null;
 }
 
+/** Re-reads the person's rights in the call's room (callRecording.ts): on
+ *  connecting, after a room change (the plugin's room; asked of K2 by the
+ *  room's slug when the rooms list knows it), whenever the recording
+ *  changes, and on K2's `access_changed`. */
+function useRecordingRights(room: CallRoom): void {
+  const connected = useVoiceCall((s) => s.phase === "connected");
+  const pluginRoom = useCallRecording((s) => s.room) ?? room.roomId;
+  const askRoom = useVoiceNames((s) => roomByKey(s.rooms[room.serverId], pluginRoom)?.id ?? pluginRoom);
+  const recordingId = useCallRecording((s) => s.recording?.recordingId ?? null);
+  const [access, setAccess] = useState(0);
+  useEffect(() => {
+    const live = subscribeAppEvents(scopeFor(room.serverId), isAccessChanged, () => setAccess((n) => n + 1));
+    return () => live.stop();
+  }, [room.serverId]);
+  useEffect(() => {
+    if (connected) void readRecordingRights(room.serverId, askRoom, pluginRoom);
+  }, [connected, room.serverId, askRoom, pluginRoom, recordingId, access]);
+}
+
+/** The call's recording under the bar (K2 0.46.11, as desktop): the badge
+ *  while a recording is on (with its running time from Sew's `started_at`),
+ *  Record and Stop as the plugin allows them, Sew's hint when Record would
+ *  be refused for now, and a refusal in K2's words. */
+export function RecordingRow({ room }: { room: CallRoom }) {
+  useRecordingRights(room);
+  const rec = useCallRecording();
+  const { canRecord, canStop, recordUnavailable } = recordingButtons(rec);
+  const running = useElapsedSince(rec.recording?.startedAt ?? null);
+  const hint = recordUnavailableText(recordUnavailable);
+  const on = rec.recording !== null;
+  if (!on && !canRecord && !canStop && !rec.error) return null;
+  return (
+    <div className="k2-kit-recording" data-testid="voice-recording">
+      {on ? (
+        <p className="sv-rec-badge" role="status" data-testid="voice-recording-badge">
+          <span className="sv-rec-badge-dot" aria-hidden="true" />
+          <span className="sv-rec-badge-word">{rec.recording?.live ? "Recording" : "Starting recording…"}</span>
+          {running ? (
+            <span className="k2-kit-recording-time" data-testid="voice-recording-time">
+              {running}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+      {canRecord || canStop ? (
+        <div className="sv-rec-controls" role="group" aria-label="Recording">
+          {canRecord ? (
+            <button
+              type="button"
+              className="sv-btn sv-btn-text sv-rec-start"
+              disabled={rec.busy || hint !== null}
+              aria-describedby={hint ? "voice-record-hint" : undefined}
+              onClick={() => void recordingCommand("start")}
+              data-testid="voice-record"
+            >
+              <Circle size={14} fill="currentColor" aria-hidden="true" /> Record
+            </button>
+          ) : null}
+          {canStop ? (
+            <button
+              type="button"
+              className="sv-btn sv-btn-text"
+              disabled={rec.busy}
+              onClick={() => void recordingCommand("stop")}
+              data-testid="voice-record-stop"
+            >
+              <CircleStop size={14} aria-hidden="true" /> Stop recording
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {hint ? (
+        <p id="voice-record-hint" className="k2-kit-recording-note" data-testid="voice-record-hint">
+          {hint}
+        </p>
+      ) : null}
+      {rec.error ? (
+        <p className="k2-kit-recording-error" role="alert" data-testid="voice-recording-error">
+          {rec.error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function Bar({ room, scope }: { room: CallRoom; scope: RefObject<HTMLElement | null> }) {
   const v = useVoice();
   if (v.phase === "idle") return <Joining room={room} />;
@@ -261,6 +362,7 @@ function Bar({ room, scope }: { room: CallRoom; scope: RefObject<HTMLElement | n
     <>
       <CallBar docked />
       <BarTime scope={scope} />
+      <RecordingRow room={room} />
     </>
   );
 }

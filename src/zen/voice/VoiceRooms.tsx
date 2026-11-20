@@ -17,7 +17,7 @@ import { canJoinWithCamera, useVoiceCall, type CallRoom } from "./voiceCall";
 import { useVoiceNames } from "./voiceNames";
 import { useThemeStore } from "../../theme/themeStore";
 import { DM_ROOM_PREFIX } from "../../api/homeChatCallsPure";
-import { hostingStateText, meOffer, roomIsFull, type VoiceRoom, type VoiceRoomsList } from "./voiceWire";
+import { hostingStateText, meOffer, recordingNoticeText, roomIsFull, type VoiceRoom, type VoiceRoomsList } from "./voiceWire";
 
 // Voice rooms on every server this phone is signed in to that hosts them
 // (K2's PRD §4.3: each server asked with its own login, never relayed).
@@ -200,9 +200,10 @@ function ServerRooms({ server }: { server: ServerEntry }) {
   // The call screen names people and rooms from these.
   const put = useVoiceNames((s) => s.put);
   const rooms = r?.ok ? r.list.rooms : null;
+  const agentReaders = r?.ok ? r.list.agentReaders : false;
   useEffect(() => {
-    if (rooms) put(server.id, rooms);
-  }, [put, rooms, server.id]);
+    if (rooms) put(server.id, rooms, agentReaders);
+  }, [put, rooms, agentReaders, server.id]);
   return (
     <section style={{ marginBottom: 18 }} data-testid={`voice-server-${server.id}`}>
       <h2 className="text-[13px] uppercase" style={{ color: "var(--color-text-muted)", padding: "0 14px 6px", letterSpacing: 0.4 }}>
@@ -377,12 +378,17 @@ export function resyncVoiceCall(): Promise<void> {
   });
 }
 
-/** A recorded room's notice, in Sew's kit's words: the answers in the kit's
- *  order, none of them a default. Nobody is recorded without a yes. */
+/** A recorded room's notice: K2's own for its rooms (K2 0.46.11, desktop's
+ *  words): OK, or leave (Don't join / Leave call). Nobody is recorded
+ *  without their OK. */
 export function ConsentSheet() {
   const sheet = useVoiceCall((s) => s.consent);
   const answer = useVoiceCall((s) => s.answerConsent);
+  const room = useVoiceCall((s) => s.room);
+  // The rooms list's word, before joining too (K2: use it for the notice).
+  const agentReaders = useVoiceNames((s) => (room ? s.agentReaders[room.serverId] === true : false));
   if (!sheet) return null;
+  const text = recordingNoticeText(room?.roomName ?? "This room", sheet, agentReaders);
   return (
     <div
       className="absolute left-0 right-0 k2-tile"
@@ -399,24 +405,34 @@ export function ConsentSheet() {
       data-testid="voice-consent"
     >
       <h2 id="voice-consent-title" className="text-[17px] font-semibold" style={{ color: "var(--color-text-primary)", marginBottom: 8 }}>
-        {sheet.title}
+        {text.title}
       </h2>
-      <p className="text-[14px]" style={{ color: "var(--color-text-secondary)", whiteSpace: "pre-line", marginBottom: 14 }}>
-        {sheet.text}
-      </p>
-      <div className="flex flex-col" style={{ gap: 8 }}>
-        {sheet.choices.map((c) => (
-          <button
-            key={c.label}
-            type="button"
-            className="zen-glass zen-glass-pill text-[15px]"
-            style={{ minHeight: 40, padding: "0 14px", color: "var(--color-text-primary)" }}
-            onClick={() => void answer(c.granted)}
-            data-testid="voice-consent-choice"
-          >
-            {c.label}
-          </button>
+      <div className="text-[14px]" style={{ color: "var(--color-text-secondary)", marginBottom: 14 }} data-testid="voice-consent-text">
+        {text.lines.map((line) => (
+          <p key={line} style={{ marginBottom: 4 }}>
+            {line}
+          </p>
         ))}
+      </div>
+      <div className="flex flex-col" style={{ gap: 8 }}>
+        <button
+          type="button"
+          className="zen-glass zen-glass-pill text-[15px] font-semibold"
+          style={{ minHeight: 40, padding: "0 14px", color: "var(--color-text-primary)" }}
+          onClick={() => void answer(true)}
+          data-testid="voice-consent-ok"
+        >
+          {text.ok}
+        </button>
+        <button
+          type="button"
+          className="zen-glass zen-glass-pill text-[15px]"
+          style={{ minHeight: 40, padding: "0 14px", color: "var(--color-status-error)" }}
+          onClick={() => void answer(null)}
+          data-testid="voice-consent-leave"
+        >
+          {text.leave}
+        </button>
       </div>
     </div>
   );
