@@ -29,3 +29,38 @@ export function focusWithKeyboard(el: HTMLElement): void {
     el.focus({ preventScroll: true });
   })();
 }
+
+/** How long a refocus after a native sheet waits for its keyboard (ms). */
+export const KEYBOARD_RETURN_MS = 1000;
+
+/** `focusWithKeyboard` for a field coming back from a native sheet that
+ *  took the keyboard (a photo or file picker). If no keyboard comes for it
+ *  within `waitMs` (no `k2-keyboard-will` show: WebKit kept the caret but
+ *  raised nothing), the field is blurred, so the screen's composer leaves
+ *  its typing gap (8px over the keyboard) and rests above the home
+ *  indicator again; a tap brings the keyboard as usual. Not while the app
+ *  is hidden (a focus change then can hang UIKit's keyboard queue;
+ *  useComposerFocusGap blurs on return). Returns a cancel. */
+export function focusWithKeyboardOrRest(el: HTMLElement, waitMs = KEYBOARD_RETURN_MS): () => void {
+  let done = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const stop = () => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    window.removeEventListener("k2-keyboard-will", onWill);
+  };
+  const onWill = (e: Event) => {
+    const d = (e as CustomEvent<{ show?: boolean }>).detail;
+    if (d && d.show !== false) stop();
+  };
+  window.addEventListener("k2-keyboard-will", onWill);
+  timer = setTimeout(() => {
+    if (done) return;
+    stop();
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+    if (document.activeElement === el) el.blur();
+  }, waitMs);
+  focusWithKeyboard(el);
+  return stop;
+}

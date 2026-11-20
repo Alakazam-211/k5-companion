@@ -28,6 +28,7 @@ import {
   nativePickerAvailable,
   skippedMessage,
 } from "../lib/nativePicker";
+import { focusWithKeyboard, focusWithKeyboardOrRest } from "../lib/nativeKeyboard";
 
 /** Composer placeholder: "Message <Agent>", "Message <Agent>/<sidecar>"
  *  on an extra chat, "Message <group>" on a project chat, else "Message".
@@ -306,19 +307,59 @@ export function GlassComposer({
   const [menuOpen, setMenuOpen] = useState(false);
   const [plusPressed, setPlusPressed] = useState(false);
   const refocus = useRef(false);
+  // A picker is open (from the menu's choice until it answers), and
+  // whether the keyboard went down for it.
+  const picking = useRef<{ keyboardHid: boolean } | null>(null);
+  const stopRest = useRef<(() => void) | null>(null);
   const hasExtras = !!menuExtras?.length;
   const plusDisabled = Boolean(attachDisabled) && !hasExtras;
   const menuShown = menuOpen && showAttach && !plusDisabled;
   const plusLit = (plusPressed || menuShown) && !plusDisabled;
   const closeMenu = useCallback(() => {
     refocus.current = false;
+    setPlusPressed(false);
     setMenuOpen(false);
   }, []);
   // Disabled or hidden while open: it stays closed when `＋` comes back.
   useEffect(() => {
     if (!showAttach || plusDisabled) setMenuOpen(false);
   }, [showAttach, plusDisabled]);
+  // A press whose release never reaches `＋` (a sheet took the screen, the
+  // app left): unlight on any release or when the page loses the screen.
+  useEffect(() => {
+    if (!plusPressed) return;
+    const release = () => setPlusPressed(false);
+    const onVis = () => {
+      if (document.visibilityState === "hidden") release();
+    };
+    window.addEventListener("pointerup", release, true);
+    window.addEventListener("pointercancel", release, true);
+    window.addEventListener("blur", release);
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      window.removeEventListener("pointerup", release, true);
+      window.removeEventListener("pointercancel", release, true);
+      window.removeEventListener("blur", release);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [plusPressed]);
+  // The keyboard dropping while a picker is up (iOS: the shell's Will*).
+  useEffect(() => {
+    const onWill = (e: Event) => {
+      const d = (e as CustomEvent<{ show?: boolean }>).detail;
+      if (picking.current && d && d.show === false) picking.current.keyboardHid = true;
+    };
+    window.addEventListener("k2-keyboard-will", onWill);
+    return () => {
+      window.removeEventListener("k2-keyboard-will", onWill);
+      stopRest.current?.();
+    };
+  }, []);
   const restoreFocus = useCallback(() => {
+    // The picker took the screen: its `＋` press never ended there.
+    setPlusPressed(false);
+    const keyboardHid = picking.current?.keyboardHid ?? false;
+    picking.current = null;
     if (!refocus.current) return;
     refocus.current = false;
     const el = ref.current;
@@ -326,7 +367,20 @@ export function GlassComposer({
     // A presented picker ends the input session without a DOM blur:
     // focus() on the still-active field would be a no-op.
     if (document.activeElement === el) el.blur();
-    el.focus({ preventScroll: true });
+    if (!nativePickerAvailable()) {
+      // Android / the web: the browser's own focus, as before.
+      el.focus({ preventScroll: true });
+      return;
+    }
+    // iOS: a script's focus gets the caret and no keyboard, and the
+    // composer would keep its typing gap with nothing under it — sitting
+    // in the home indicator (a cancelled Photo Library, Riley
+    // 2026-11-20). Ask the shell for the keyboard; if the picker took it
+    // and none comes back, blur so the bar rests as before.
+    stopRest.current?.();
+    stopRest.current = null;
+    if (keyboardHid) stopRest.current = focusWithKeyboardOrRest(el);
+    else focusWithKeyboard(el);
   }, [ref]);
   const deliver = (files: File[]) => {
     if (files.length) onAttach?.(files);
@@ -334,15 +388,21 @@ export function GlassComposer({
   const pickWithInput = (choice: AttachChoice) => {
     const input =
       choice === "camera" ? cameraRef.current : choice === "library" ? photoRef.current : fileRef.current;
+    picking.current = { keyboardHid: false };
     input?.click();
   };
   const choose = (choice: AttachChoice) => {
     setMenuOpen(false);
+    setPlusPressed(false);
     // The camera input opens the camera directly (no iOS menu).
     if (choice === "camera" || !nativePickerAvailable()) {
       pickWithInput(choice);
       return;
     }
+    picking.current = { keyboardHid: false };
+    // No native picker here after all: the input's change / cancel
+    // restores focus when it closes.
+    let handedOff = false;
     nativePick(choice === "library" ? "media" : "documents")
       .then((out) => {
         deliver(out.files);
@@ -351,13 +411,16 @@ export function GlassComposer({
       })
       .catch((e) => {
         if (isUnsupportedPick(e)) {
+          handedOff = true;
           pickWithInput(choice);
           return;
         }
         console.warn("[attach] native picker failed:", e);
         onAttachError?.("Could not open the picker.");
       })
-      .finally(restoreFocus);
+      .finally(() => {
+        if (!handedOff) restoreFocus();
+      });
   };
   // The web inputs: `change` on a pick, `cancel` (Safari 16.4+) on close.
   useEffect(() => {
