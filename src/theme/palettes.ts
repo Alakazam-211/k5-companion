@@ -194,7 +194,7 @@ export function resolveScheme(mode: SchemeMode, systemLight = systemPrefersLight
 }
 
 /** The palette for screens that stay dark whatever the mode (the
- *  terminal, Riley 2026-11-19: "Even if light mode is on the terminal
+ *  terminal, the owner 2026-11-19: "Even if light mode is on the terminal
  *  view theme should always be obsidian or dusk"): the one on screen when
  *  it's dark, else the person's dark-side pick when that's dark, else
  *  Obsidian. */

@@ -249,7 +249,7 @@ export function VoiceRoomsOverlay({ onClose }: { onClose: () => void }) {
   // In a call the page is the call, at full height; to join another, leave
   // this one (owner 2026-11-09).
   const inCall = useVoiceCall((s) => s.phase !== "idle" && !!s.room);
-  // The call screen is dark in every palette (Riley 2026-11-20: Veil left
+  // The call screen is dark in every palette (the owner 2026-11-20: Veil left
   // the header light and the call bar white under the kit's white text):
   // Obsidian or Dusk, the keyboard and status bar too, while the call is on
   // screen, as on the terminal.

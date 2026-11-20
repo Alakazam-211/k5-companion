@@ -374,7 +374,7 @@ export function GlassComposer({
     }
     // iOS: a script's focus gets the caret and no keyboard, and the
     // composer would keep its typing gap with nothing under it — sitting
-    // in the home indicator (a cancelled Photo Library, Riley
+    // in the home indicator (a cancelled Photo Library, the owner
     // 2026-11-20). Ask the shell for the keyboard; if the picker took it
     // and none comes back, blur so the bar rests as before.
     stopRest.current?.();

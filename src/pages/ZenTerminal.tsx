@@ -79,7 +79,7 @@ export const ZEN_TERMINAL_HEADER_PX = 46;
  *  thread, never /sessions. No thread toggle here by design. */
 export function ZenTerminal() {
   const { terminalId } = useParams<{ terminalId: string }>();
-  // The terminal is always dark (Riley 2026-11-19): Obsidian or Dusk,
+  // The terminal is always dark (the owner 2026-11-19): Obsidian or Dusk,
   // even with Veil on screen, while this page is open.
   useEffect(() => useThemeStore.getState().holdDark(), []);
   const navigate = useNavigate();

@@ -1,6 +1,6 @@
 // What this person's phone gets for a Home chat (K2 0.46.16
 // `home-chat-push-v1`): a channel's push level (All messages or @mentions
-// only; Riley: two choices, no Off, mute stays separate; DMs always
+// only; the owner: two choices, no Off, mute stays separate; DMs always
 // notify) and the person's push prefs on a server (Show message text).
 //
 // The levels live in Sew; the daemon reads and writes them

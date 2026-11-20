@@ -1,5 +1,5 @@
 // Light palettes (Veil): glass buttons and rows take the palette's ink, never
-// a hard-coded white (Riley 2026-11-19: the Files X and the viewer's
+// a hard-coded white (the owner 2026-11-19: the Files X and the viewer's
 // Source / Close were white on Veil).
 import { describe, expect, it } from "vitest";
 import closeButton from "./GlassCloseButton.tsx?raw";

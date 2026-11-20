@@ -231,7 +231,7 @@ export function forbiddenCopy(host: string): string {
 export const AIRGAP_NOTE = "Updates are off on this server (air-gap is on).";
 
 /** Updates don't interrupt agents any more (K2's "Agents keep running
- *  through updates and restarts", on by default; Riley 2026-11-19: the old
+ *  through updates and restarts", on by default; the owner 2026-11-19: the old
  *  "will be stopped and restarted" warning is wrong now). The server only
  *  reports the switch to dev builds, so the one exception is a plain note,
  *  in desktop's words for the setting. */

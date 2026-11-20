@@ -430,7 +430,7 @@ describe("AttachMenu: back from a picker on iOS (the keyboard)", () => {
   }
   const cancelled = { files: [], skipped: [], cancelled: true };
 
-  it("a cancelled Photo Library asks for the keyboard back, and rests (blurred) when none comes — Riley 2026-11-20", async () => {
+  it("a cancelled Photo Library asks for the keyboard back, and rests (blurred) when none comes — the owner 2026-11-20", async () => {
     const answer = openLibrary();
     // The picker takes the screen and the keyboard (the shell's DidHide
     // resigns the field).

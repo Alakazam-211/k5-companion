@@ -10,7 +10,7 @@ import type { StubAgent } from "./stubData";
 // count). Once on they stay on while that Thread is open, and reset on a
 // switch. Every bubble from someone else gets the column, so they line up;
 // the picture draws once per run, on its LAST bubble, at the bottom left,
-// level with the tail (Riley 2026-11-18, the phone-chat place; K2
+// level with the tail (the owner 2026-11-18, the phone-chat place; K2
 // a096cbc1d2). The name line stays over the first bubble. A run ends
 // where the tail does (another sender, you, a 120 s gap, a deleted line:
 // chatReceipt.ts); a deleted line draws no picture. A new message from the

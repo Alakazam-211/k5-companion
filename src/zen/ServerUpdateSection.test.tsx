@@ -179,7 +179,7 @@ describe("ServerUpdateSection confirm + run", () => {
     fireEvent.click(await screen.findByTestId("server-update-update"));
     const sheet = screen.getByTestId("server-update-confirm");
     expect(within(sheet).getByTestId("server-update-confirm-title").textContent).toBe("Update Home to 0.46.1?");
-    // Updates don't interrupt agents (Riley 2026-11-19): no warning box.
+    // Updates don't interrupt agents (the owner 2026-11-19): no warning box.
     expect(within(sheet).queryByTestId("server-update-confirm-warning")).toBeNull();
     expect(sheet.textContent).not.toMatch(/stopped and restarted|interrupted/);
     const body = within(sheet).getByTestId("server-update-confirm-body").textContent;

@@ -161,7 +161,7 @@ describe("mentions", () => {
 
   it("@me in the words, by username or name, whole names only", () => {
     expect(homeChatMentionsMe(m({ body: "thanks @Riley!" }), me)).toBe(true);
-    expect(homeChatMentionsMe(m({ body: "cc @riley long" }), me)).toBe(true);
+    expect(homeChatMentionsMe(m({ body: "cc @riley stone" }), me)).toBe(true);
     expect(homeChatMentionsMe(m({ body: "@rileyx is new" }), me)).toBe(false);
     expect(homeChatMentionsMe(m({ body: "mail z@riley.dev" }), me)).toBe(false);
     expect(textMentions("no at sign", ["riley"])).toBe(false);

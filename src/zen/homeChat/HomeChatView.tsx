@@ -819,7 +819,7 @@ export function HomeChatView({
         data-testid="home-chat-header"
         style={{ zIndex: 10, paddingTop: "env(safe-area-inset-top)", pointerEvents: "none" }}
       >
-        {/* The agent chats' header blur and tint, as they are (Riley
+        {/* The agent chats' header blur and tint, as they are (the owner
             2026-11-19: "DMs on mobile should have the same gradient system
             at the top of the page as in the chats with agents"; replaces
             4.3.0's solid scroll-edge fade, `--edge`). */}
