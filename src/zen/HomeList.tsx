@@ -41,7 +41,7 @@ import { pictureRefOf } from "./homeChat/homeChatModel";
 import { confirmRemoveChatRow } from "./homeChat/HomeConfirmSheet";
 import { callPersonFromRow } from "./homeChat/openHomeChat";
 
-/** The first agents of a Home sit in the Agents page's grid (Riley
+/** The first agents of a Home sit in the Agents page's grid (owner
  *  2026-11-09); the rest are rows. */
 export const HOME_GRID_MAX = 9;
 
@@ -351,7 +351,7 @@ export function HomeList({
       : [];
 
   /** A person's or channel's menu (desktop: Pin / Unpin, Remove from
-   *  <group>; Call on a person, Riley: calls live in the long press). */
+   *  <group>; Call on a person, the owner: calls live in the long press). */
   const chatMenuEntries = (v: ChatHomeView): AgentMenuEntry[] => {
     const look = lookOf(v);
     const group = otherHomeOf?.(v.row.address) ?? homeName;
@@ -734,7 +734,7 @@ export function HomeList({
                 />
               ) : null}
               {chip ? (
-                // Across the picture's bottom edge (Riley 2026-11-09); the
+                // Across the picture's bottom edge (owner 2026-11-09); the
                 // activity dot moves up the circle to clear it.
                 <span
                   className="absolute zen-glass zen-glass-pill truncate"
