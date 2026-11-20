@@ -73,20 +73,37 @@ export type NoiseRemovalState = {
   capture_stage_bypassed?: "budget" | "fault" | string;
   /** The pipeline's 99th percentile of the stage's last 100 blocks, µs. */
   capture_stage_p99_us?: number;
-  // DeepFilterNet3's own state and the grace window's details (Sew 0.11.1;
-  // absent from an older plugin). The call log prints whatever arrives.
-  /** `warming`, `stepped_down` or `retired`. */
-  dfn3_state?: "warming" | "stepped_down" | "retired" | string;
-  /** When DeepFilterNet3 is retried, ms from now. */
+  // DeepFilterNet3's own state, its timing on the CPU clock and the
+  // pipeline's grace window (Sew 0.11.1 / plugin 0.9.1; each absent while
+  // unset or from an older plugin). The call log prints whatever arrives.
+  /** `idle`, `warming`, `running`, `stepped_down` or `retired`. */
+  dfn3_state?: "idle" | "warming" | "running" | "stepped_down" | "retired" | string;
+  /** While stepped down: when DeepFilterNet3 is retried, ms from now. */
   retry_in_ms?: number;
-  /** The grace window. */
-  grace?: boolean | number | string;
-  /** The grace window's blocks. */
-  grace_blocks?: number;
-  /** Blocks over the budget during grace windows. */
-  grace_over_budget?: number;
-  /** The last transient the stage saw. */
-  last_transient?: string;
+  /** Step-downs that failed inside a grace window (they don't retire DFN3). */
+  grace_step_downs?: number;
+  /** The slowest block on the audio thread's CPU clock, µs. */
+  slowest_block_cpu_us?: number;
+  /** The 99th percentile block, wall clock and CPU clock, µs. */
+  p99_block_us?: number;
+  p99_block_cpu_us?: number;
+  /** How the pipeline times the stage: `thread_cpu` or `wall`. */
+  capture_stage_clock?: "thread_cpu" | "wall" | string;
+  /** The stage's slowest block on the wall clock, µs. */
+  capture_stage_max_wall_us?: number;
+  /** Blocks over budget on the wall clock but not on the CPU clock (the
+   *  thread was pre-empted, not slow). */
+  capture_stage_preempted_over_budget?: number;
+  /** Blocks past the wall-clock starvation cutoff. */
+  capture_stage_starved?: number;
+  /** The pipeline's grace window is open. */
+  capture_stage_grace?: boolean;
+  /** Blocks run inside grace windows, and those over budget there. */
+  capture_stage_grace_blocks?: number;
+  capture_stage_grace_over_budget?: number;
+  /** The last busy moment: `call_start`, `audio_session_activated`,
+   *  `route_change`, `camera_start`, `app_scene_change` or `other`. */
+  capture_stage_last_transient?: string;
   /** Anything a later plugin adds: the call log prints it too. */
   [field: string]: unknown;
 };

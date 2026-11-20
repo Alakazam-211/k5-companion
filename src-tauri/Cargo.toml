@@ -45,10 +45,12 @@ tauri-plugin-http = "2"
 objc2 = "0.6.4"
 
 # Voice rooms (4.2.0, iOS first; Android is Jamie's): Sew's native voice
-# plugin over sew-call-client and K2's kessel-audio. Sew 0.11.0: plugin and
-# call client 0.9.0 (0.8.2 was their first crates.io release), with
-# sew-str0m 0.25.6, kessel-audio (0.2.1: the phone's raw capture for noise
-# removal Off) and the sew-* support crates 0.11.0, all from crates.io.
+# plugin over sew-call-client and K2's kessel-audio. Sew 0.11.1: plugin and
+# call client 0.9.1 (0.8.2 was their first crates.io release), with
+# sew-str0m 0.25.6, kessel-audio 0.2.3 (stage grace after call start, camera
+# start and scene change, which the plugin forwards itself; the capture stage
+# judged by thread CPU time) and the sew-* support crates 0.11.1, all from
+# crates.io.
 # 0.9.0 makes CallState, JoinArgs, Participant, VideoCaps and sew-call-client's
 # JoinRequest #[non_exhaustive] (src/voice.rs builds JoinArgs with ::new and
 # matches CallState with a wildcard arm); recordings gain started_at (0.8.3)
@@ -69,15 +71,15 @@ base64 = "0.22"
 # resource directory. Since 0.8.1 the plugin only checks them at start and
 # loads the model when a call first needs it (released after an idle time).
 # 0.8.2: grace windows for noise removal's timing rules (src/voice.rs).
-tauri-plugin-sew-voice = { version = "0.9.0", default-features = false, features = ["tauri", "audio", "mobile", "builtin-ring-provider", "video-core", "video", "dfn3"] }
-sew-call-client = { version = "0.9.0", default-features = false, features = ["mobile"] }
+tauri-plugin-sew-voice = { version = "0.9.1", default-features = false, features = ["tauri", "audio", "mobile", "builtin-ring-provider", "video-core", "video", "dfn3"] }
+sew-call-client = { version = "0.9.1", default-features = false, features = ["mobile"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = "2"
 
 # src/voice.rs's tests: the DeepFilterNet3 weights' pinned sha256, which
 # scripts/fetch-dfn3.sh must match (the same sew-noise the plugin uses).
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dev-dependencies]
-sew-noise = { version = "0.11.0", features = ["dfn3"] }
+sew-noise = { version = "0.11.1", features = ["dfn3"] }
 
 [profile.release]
 strip = true

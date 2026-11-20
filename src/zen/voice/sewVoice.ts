@@ -252,10 +252,18 @@ const NOISE_KNOWN = [
   "capture_stage_p99_us",
   "dfn3_state",
   "retry_in_ms",
-  "grace",
-  "grace_blocks",
-  "grace_over_budget",
-  "last_transient",
+  "grace_step_downs",
+  "slowest_block_cpu_us",
+  "p99_block_us",
+  "p99_block_cpu_us",
+  "capture_stage_clock",
+  "capture_stage_max_wall_us",
+  "capture_stage_preempted_over_budget",
+  "capture_stage_starved",
+  "capture_stage_grace",
+  "capture_stage_grace_blocks",
+  "capture_stage_grace_over_budget",
+  "capture_stage_last_transient",
 ] as const;
 
 /** A field's value as the call log writes it: false, 0 and null too;
