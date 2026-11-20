@@ -299,7 +299,7 @@ describe("Zen Sessions drawer", () => {
     expect(within(drawer).queryByTestId("sessions-empty")).toBeNull();
   });
 
-  it("reads Active, + New session, History top to bottom", async () => {
+  it("reads Active, History top to bottom, with + New session pinned in the footer last", async () => {
     vi.mocked(getActivePresets).mockResolvedValue({ ok: true, data: PRESETS } as never);
     await openMain();
     const drawer = await openDrawer();
@@ -313,10 +313,13 @@ describe("Zen Sessions drawer", () => {
     const first = (id: string) => order.indexOf(id);
     expect(first("sessions-active")).toBe(0);
     expect(first("session-row-main")).toBeGreaterThan(first("sessions-active"));
-    expect(first("session-row-terminal")).toBeLessThan(first("sessions-new"));
-    expect(first("sessions-new")).toBeLessThan(first("sessions-history"));
+    expect(first("session-row-terminal")).toBeLessThan(first("sessions-history"));
+    expect(order.lastIndexOf("session-row-terminal")).toBeLessThan(first("sessions-history"));
     expect(first("sessions-history")).toBeLessThan(first("session-row-history"));
-    expect(order.lastIndexOf("session-row-terminal")).toBeLessThan(first("sessions-new"));
+    // New session is the drawer's footer (K2 Design 2026-11-20): after the
+    // whole list, History included.
+    expect(order.lastIndexOf("session-row-history")).toBeLessThan(first("sessions-new"));
+    expect(first("sessions-new")).toBe(order.length - 1);
     expect(within(drawer).getByTestId("sessions-history").textContent).toBe("History");
   });
 
