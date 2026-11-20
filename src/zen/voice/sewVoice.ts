@@ -231,31 +231,68 @@ export async function shareCallLog(): Promise<ShareOutcome> {
   return shareOrSaveBytes(new TextEncoder().encode(text), "K2 call log.txt", "text/plain");
 }
 
-/** The noise removal state as call log codes: `noise standard standard dfn3
- *  phone_mode:os`, then the stage's timing when the plugin sends it (Sew
- *  0.10.4): `step_down_reason:slow_window last_step_down_ms_ago:1200
- *  slowest_block_us:9100 blocks_over_budget:3 in_grace:true
- *  capture_stage_strikes:1 capture_stage_bypassed:budget
- *  capture_stage_p99_us:6400`. Each word only when its field is there. */
+/** The fields the call log prints first, in this order (old logs read the
+ *  same): the reasons and the phone's capture, the stage's timing (Sew
+ *  0.10.4), then DeepFilterNet3's state and the grace window (Sew 0.11.1). */
+const NOISE_KNOWN = [
+  "reason",
+  "model_reason",
+  "step_downs",
+  "phone_mode",
+  "phone_mode_reason",
+  "phone_mode_switches",
+  "phone_mode_gap_ms",
+  "step_down_reason",
+  "last_step_down_ms_ago",
+  "slowest_block_us",
+  "blocks_over_budget",
+  "in_grace",
+  "capture_stage_strikes",
+  "capture_stage_bypassed",
+  "capture_stage_p99_us",
+  "dfn3_state",
+  "retry_in_ms",
+  "grace",
+  "grace_blocks",
+  "grace_over_budget",
+  "last_transient",
+] as const;
+
+/** A field's value as the call log writes it: false, 0 and null too;
+ *  objects and arrays as compact JSON. */
+function noiseValue(v: unknown): string {
+  if (v === null) return "null";
+  if (typeof v === "object") {
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return "unreadable";
+    }
+  }
+  return String(v);
+}
+
+/** The noise removal state as call log codes: `noise standard standard dfn3`
+ *  (mode, active, model), then every other field of the payload as
+ *  `key:value`, false, 0 and null included: the known fields first in
+ *  their order (`model_reason:budget step_downs:0 phone_mode:os …
+ *  in_grace:false …`), then any other field by name, so nothing the plugin
+ *  sends is dropped. */
 export function noiseWords(s: NoiseRemovalState | null | undefined): string[] | null {
   if (!s || typeof s !== "object" || typeof s.mode !== "string") return null;
   const words = ["noise", s.mode, String(s.active ?? "")];
-  if (s.model) words.push(s.model);
-  if (s.reason) words.push(`reason:${s.reason}`);
-  if (s.model_reason) words.push(`model_reason:${s.model_reason}`);
-  if (s.step_downs) words.push(`step_downs:${s.step_downs}`);
-  if (s.phone_mode) words.push(`phone_mode:${s.phone_mode}`);
-  if (s.phone_mode_reason) words.push(`phone_mode_reason:${s.phone_mode_reason}`);
-  if (s.phone_mode_switches) words.push(`phone_mode_switches:${s.phone_mode_switches}`);
-  if (typeof s.phone_mode_gap_ms === "number") words.push(`phone_mode_gap_ms:${s.phone_mode_gap_ms}`);
-  if (s.step_down_reason) words.push(`step_down_reason:${s.step_down_reason}`);
-  if (typeof s.last_step_down_ms_ago === "number") words.push(`last_step_down_ms_ago:${s.last_step_down_ms_ago}`);
-  if (typeof s.slowest_block_us === "number") words.push(`slowest_block_us:${s.slowest_block_us}`);
-  if (s.blocks_over_budget) words.push(`blocks_over_budget:${s.blocks_over_budget}`);
-  if (s.in_grace === true) words.push("in_grace:true");
-  if (s.capture_stage_strikes) words.push(`capture_stage_strikes:${s.capture_stage_strikes}`);
-  if (s.capture_stage_bypassed) words.push(`capture_stage_bypassed:${s.capture_stage_bypassed}`);
-  if (typeof s.capture_stage_p99_us === "number") words.push(`capture_stage_p99_us:${s.capture_stage_p99_us}`);
+  const printed = new Set<string>(["mode", "active"]);
+  if (typeof s.model === "string" && s.model) {
+    words.push(s.model);
+    printed.add("model");
+  }
+  const word = (key: string) => {
+    if (printed.has(key) || !Object.prototype.hasOwnProperty.call(s, key) || s[key] === undefined) return;
+    printed.add(key);
+    words.push(`${key}:${noiseValue(s[key])}`);
+  };
+  for (const key of NOISE_KNOWN) word(key);
+  for (const key of Object.keys(s).sort()) word(key);
   return words;
 }
 

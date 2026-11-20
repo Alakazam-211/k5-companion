@@ -29,7 +29,7 @@ export const NOISE_REMOVAL_KEY = "k2.voice.noiseRemoval";
 export type NoiseMode = "standard" | "off";
 
 /** The plugin's answer and event (`NoiseRemovalState`). Every field but
- *  `mode` and `active` is absent when unset. */
+ *  `mode` and `active` may be absent. */
 export type NoiseRemovalState = {
   mode: NoiseMode | string;
   active: NoiseMode | string;
@@ -73,6 +73,22 @@ export type NoiseRemovalState = {
   capture_stage_bypassed?: "budget" | "fault" | string;
   /** The pipeline's 99th percentile of the stage's last 100 blocks, µs. */
   capture_stage_p99_us?: number;
+  // DeepFilterNet3's own state and the grace window's details (Sew 0.11.1;
+  // absent from an older plugin). The call log prints whatever arrives.
+  /** `warming`, `stepped_down` or `retired`. */
+  dfn3_state?: "warming" | "stepped_down" | "retired" | string;
+  /** When DeepFilterNet3 is retried, ms from now. */
+  retry_in_ms?: number;
+  /** The grace window. */
+  grace?: boolean | number | string;
+  /** The grace window's blocks. */
+  grace_blocks?: number;
+  /** Blocks over the budget during grace windows. */
+  grace_over_budget?: number;
+  /** The last transient the stage saw. */
+  last_transient?: string;
+  /** Anything a later plugin adds: the call log prints it too. */
+  [field: string]: unknown;
 };
 
 /** On unless "off" is stored. */

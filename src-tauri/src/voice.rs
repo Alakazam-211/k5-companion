@@ -310,7 +310,7 @@ pub async fn join_with_camera(control: &VoiceControl, native: &Native, target: S
     // Before the join: the system call starts on its first `connecting`.
     to_shim(true);
     native.note("join with camera");
-    let args = JoinArgs { target, room, muted: None, deafened: None };
+    let args = JoinArgs::new(target, room);
     match control.join_with(args, JoinOptions::with_camera()).await {
         Ok(joined) => Ok(serde_json::to_value(joined).unwrap_or(Value::Null)),
         Err(e) => {
@@ -999,6 +999,10 @@ fn callkit_loop(native: &mut impl CallOps, rx: mpsc::Receiver<ToShim>) {
                         video = false;
                     }
                 }
+                // A state a later plugin adds (CallState is #[non_exhaustive]
+                // since 0.9.0): the system call stays as it is until a known
+                // state says otherwise.
+                _ => {}
             },
             ToShim::Muted(muted) => {
                 if up {
@@ -1991,12 +1995,22 @@ impl Native {
 }
 
 /// A line from the page (the kit's camera calls and `local_video`): words
-/// as codes only, at most 6, so nothing but codes reaches the log.
+/// as codes only, at most 6, so nothing but codes reaches the log. A
+/// `noise` line (sewVoice.ts's `noiseWords`: every field of the plugin's
+/// noise_removal event) keeps up to [`NOISE_WORDS`].
 pub fn note_from_page(native: &Native, words: &[String]) {
-    let line: Vec<String> = words.iter().take(6).map(|w| code(w)).collect();
-    if !line.is_empty() {
-        native.note(&line.join(" "));
+    if let Some(line) = page_line(words) {
+        native.note(&line);
     }
+}
+
+/// The most words a `noise` line keeps: today's event has about 25 fields.
+const NOISE_WORDS: usize = 48;
+
+fn page_line(words: &[String]) -> Option<String> {
+    let max = if words.first().map(String::as_str) == Some("noise") { NOISE_WORDS } else { 6 };
+    let line: Vec<String> = words.iter().take(max).map(|w| code(w)).collect();
+    (!line.is_empty()).then(|| line.join(" "))
 }
 
 /// The call log for "Send call log".
@@ -2035,7 +2049,17 @@ fn state_line(s: &CallState) -> String {
         CallState::Reconnecting { attempt } => format!("state reconnecting attempt={attempt}"),
         CallState::ConsentRequired { notice_version, .. } => format!("state consent_required notice={notice_version}"),
         CallState::Ended { reason } => format!("state ended reason={}", code(reason)),
+        // A state a later plugin adds (CallState is #[non_exhaustive]): its wire name.
+        other => format!("state {}", state_name(other)),
     }
+}
+
+/// A call state's wire name (`{"state": "<name>", ...}`), or `unknown`.
+fn state_name(s: &CallState) -> String {
+    serde_json::to_value(s)
+        .ok()
+        .and_then(|v| v.get("state").and_then(Value::as_str).map(code))
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 /// A shim event (K2CallShim.swift): its name and the fields worth knowing.
@@ -2338,6 +2362,36 @@ mod tests {
         let acts = w.recording(Some(&held()));
         let [Act::Notify { title, .. }] = acts.as_slice() else { panic!("{acts:?}") };
         assert_eq!(title, "This room is recorded");
+    }
+
+    /// A page line keeps 6 words, a `noise` line every field (up to
+    /// NOISE_WORDS), each as a code: false, 0 and null stay.
+    #[test]
+    fn a_noise_line_keeps_every_field() {
+        let w = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(page_line(&w(&["camera", "a", "b", "c", "d", "e", "f"])).unwrap(), "camera a b c d e");
+        let noise = w(&[
+            "noise", "standard", "standard", "dfn3", "step_downs:0", "phone_mode:os", "in_grace:false",
+            "capture_stage_p99_us:6400", "dfn3_state:warming", "retry_in_ms:1500", "zz_new:null",
+        ]);
+        assert_eq!(
+            page_line(&noise).unwrap(),
+            "noise standard standard dfn3 step_downs:0 phone_mode:os in_grace:false capture_stage_p99_us:6400 \
+             dfn3_state:warming retry_in_ms:1500 zz_new:null"
+        );
+        let many: Vec<String> = std::iter::once("noise".to_owned()).chain((0..100).map(|i| format!("f{i}:0"))).collect();
+        assert_eq!(page_line(&many).unwrap().split(' ').count(), NOISE_WORDS);
+        assert_eq!(page_line(&[]), None);
+    }
+
+    /// The wildcard arm's line (a state a later plugin adds) uses the
+    /// state's wire name, the same as the known states' lines.
+    #[test]
+    fn a_state_names_itself_by_its_wire_name() {
+        assert_eq!(state_name(&CallState::Idle), "idle");
+        assert_eq!(state_name(&CallState::Reconnecting { attempt: 2 }), "reconnecting");
+        assert_eq!(state_name(&held_at(3)), "consent_required");
+        assert_eq!(state_name(&CallState::Ended { reason: "left".into() }), "ended");
     }
 
     #[test]
