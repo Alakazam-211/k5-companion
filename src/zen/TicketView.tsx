@@ -1652,7 +1652,7 @@ function TicketBubbleBox({
   const ref = useRef<HTMLDivElement>(null);
   useDeliverBrighten(ref, pending, pending && !flying && !fade, flying);
   return (
-    <div ref={ref} className={className} data-testid="ticket-bubble" data-fly-target={flyTarget} style={style}>
+    <div ref={ref} className={className} data-testid="ticket-bubble" data-bubble-body="" data-fly-target={flyTarget} style={style}>
       {children}
     </div>
   );
