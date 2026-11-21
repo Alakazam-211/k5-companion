@@ -108,6 +108,18 @@ export type NoiseRemovalState = {
    *  `workgroup` (joined the audio unit's workgroup), `time_constraint`,
    *  `qos` or `none` (off Apple). Absent until the pipeline reports. */
   capture_stage_dsp_scheduling?: "workgroup" | "time_constraint" | "qos" | "none" | string;
+  /** The DSP scheduling the host asked for and what is in effect (Sew
+   *  0.11.3, kessel-audio 0.2.5): `workgroup`, `time_constraint`, `none`,
+   *  `own_workgroup`; `fallback` says why the OS refused a mode. Each is
+   *  absent while unset or zero. */
+  capture_stage_dsp_sched_requested?: string;
+  capture_stage_dsp_sched_effective?: string;
+  capture_stage_dsp_sched_fallback?: string;
+  capture_stage_dsp_period_us?: number;
+  capture_stage_dsp_computation_us?: number;
+  capture_stage_dsp_constraint_us?: number;
+  capture_stage_dsp_interval_deadline_us?: number;
+  capture_stage_dsp_intervals?: number;
   /** Anything a later plugin adds: the call log prints it too. */
   [field: string]: unknown;
 };

@@ -266,6 +266,14 @@ const NOISE_KNOWN = [
   "capture_stage_grace_over_budget",
   "capture_stage_last_transient",
   "capture_stage_dsp_scheduling",
+  "capture_stage_dsp_sched_requested",
+  "capture_stage_dsp_sched_effective",
+  "capture_stage_dsp_sched_fallback",
+  "capture_stage_dsp_period_us",
+  "capture_stage_dsp_computation_us",
+  "capture_stage_dsp_constraint_us",
+  "capture_stage_dsp_interval_deadline_us",
+  "capture_stage_dsp_intervals",
 ] as const;
 
 /** A field's value as the call log writes it: false, 0 and null too;
