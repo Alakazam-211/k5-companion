@@ -58,10 +58,15 @@ export function displayAuthor(
 }
 
 /** Probe `/cli/auth/whoami` on `scope`'s server. Cached per server. No
- *  revive: an identity probe must not move recovery state. */
-export async function ensureIdentity(scope: ServerScope): Promise<SessionIdentity | null> {
+ *  revive: an identity probe must not move recovery state. `fresh` reads
+ *  again past the cache (K2 0.46.17 `access_changed`); the old identity
+ *  stays until the new one is in. */
+export async function ensureIdentity(
+  scope: ServerScope,
+  opts: { fresh?: boolean } = {}
+): Promise<SessionIdentity | null> {
   const hit = cached.peek(scope.id)?.identity;
-  if (hit) return hit;
+  if (hit && !opts.fresh) return hit;
   const entry = useServersStore.getState().servers.find((s) => s.id === scope.id);
   const fallback: SessionIdentity = {
     username: entry?.username ?? "owner",
@@ -95,8 +100,17 @@ export async function ensureIdentity(scope: ServerScope): Promise<SessionIdentit
       role: typeof j.role === "string" && j.role.trim() ? j.role.trim() : null,
     });
   } catch {
+    // A failed fresh read keeps what was known.
+    if (hit && opts.fresh) return hit;
     return remember(fallback);
   }
+}
+
+/** K2 0.46.17 `access_changed`: read this server's identity again, only
+ *  when something has read it (a surface shows it). */
+export function refreshIdentity(scope: ServerScope): Promise<SessionIdentity | null> | null {
+  if (!cached.peek(scope.id)?.identity) return null;
+  return ensureIdentity(scope, { fresh: true });
 }
 
 /** Tests only. */

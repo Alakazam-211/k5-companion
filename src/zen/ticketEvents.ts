@@ -5,7 +5,7 @@ import type { ServerScope } from "../api/scope";
 import { queueDial, type DialTicket } from "../api/dialQueue";
 import { emitServerSignal, onServerSignal } from "../api/serverSignals";
 import { inBackground, onAppLifecycle } from "../lib/appLifecycle";
-import { revive } from "../lib/revive";
+import { checkAfterRevoked, isAccessChangedFrame, noteAccessChanged } from "../api/accessLive";
 import { onServerForget } from "../stores/servers";
 import { openSocket } from "../lib/netStats";
 import { STABLE_OPEN_MS } from "../lib/reconnect";
@@ -27,17 +27,23 @@ import { STABLE_OPEN_MS } from "../lib/reconnect";
 // Close codes (daemon `session_events_ws.rs`, MS27 as amended by MA14):
 //   - 4001 = this login was KICKED (removed from the server): stop, never
 //     reconnect, never sign in on its own; the pool and room hear it.
-//   - 4003 = the token was REVOKED: one whoami check (revive on this
-//     server, never deleting the token from here, MA22), then reconnect
-//     while it still stands; a dead token stops the hub.
+//   - 4003 = access REMOVED (K2 0.46.17: removal, disable, a sign-out role
+//     change; before, a revoked token): one whoami check (revive on this
+//     server, never deleting the token from here, MA22). A dead login, or
+//     a 401/403 whoami could not explain, stops the hub and the server says
+//     "Sign in again" (api/accessLive.ts); a login that still stands
+//     reconnects once, and a second 4003 before the socket stayed open
+//     stops the hub instead of looping.
 //   - 4008 = we LAGGED: reconnect at once and re-pull (every subscriber
 //     refetches; the room re-pulls its snapshots).
 //   - anything else: reconnect with backoff, 500 ms doubling to 5 s, each
 //     delay drawn from [ms/2, ms] (desktop `lib/backoff.ts`).
 // A `hello` whose `instance_id` changed means the daemon restarted: full
-// refetch. Every (re)dial goes through the dial queue (MS26). With the
-// multi-server flag on, the app's background closes every hub socket and
-// the foreground reopens them (MS28).
+// refetch. `access_changed` (K2 0.46.17) asks for one re-read of this
+// login's access (api/accessLive.ts) and still reaches its subscribers.
+// Every (re)dial goes through the dial queue (MS26). With the multi-server
+// flag on, the app's background closes every hub socket and the
+// foreground reopens them (MS28).
 
 export const TICKET_EVENT_DEBOUNCE_MS = 300;
 export const EVENTS_BACKOFF_BASE_MS = 500;
@@ -87,6 +93,8 @@ type Hub = {
   /** Closed for the app's background; the foreground reopens it. */
   paused: boolean;
   dead: boolean;
+  /** Closed 4003 and not open long since: a second 4003 stops the hub. */
+  revoked: boolean;
 };
 
 const hubs = new Map<string, Hub>();
@@ -174,12 +182,15 @@ function schedule(hub: Hub, delay = eventsBackoffMs(hub.attempt)) {
 }
 
 /** 4003: whoami on this server first (never deleting the token from a
- *  background socket, MA22). A token that still stands reconnects. */
+ *  background socket, MA22). A login that is gone stops the hub (the
+ *  server says "Sign in again"); one that still stands reconnects, unless
+ *  this socket was refused 4003 again without staying open. */
 async function afterRevoked(hub: Hub) {
-  const outcome = await revive(hub.scope, { background: true });
+  const repeat = hub.revoked;
+  hub.revoked = true;
+  const verdict = await checkAfterRevoked(hub.scope, { repeat });
   if (hub.dead || hub.paused) return;
-  if (outcome === "signin-required" || outcome === "not-applicable") {
-    emitServerSignal(hub.key, "signin");
+  if (verdict !== "reconnect") {
     killHub(hub);
     return;
   }
@@ -249,6 +260,8 @@ function dialHub(hub: Hub): WebSocket | "failed" | null {
     } catch {
       return;
     }
+    // K2 0.46.17: one re-read of this login's access per burst.
+    if (isAccessChangedFrame(frame)) noteAccessChanged(hub.key);
     if (frame && typeof frame === "object" && (frame as { kind?: unknown }).kind === "hello") {
       const id = (frame as { instance_id?: unknown }).instance_id;
       const next = typeof id === "string" ? id : null;
@@ -274,7 +287,10 @@ function dialHub(hub: Hub): WebSocket | "failed" | null {
   sock.onclose = (e) => {
     if (hub.dead || hub.ws !== sock) return;
     hub.ws = null;
-    if (hub.openedAt && Date.now() - hub.openedAt >= STABLE_OPEN_MS) hub.attempt = 0;
+    if (hub.openedAt && Date.now() - hub.openedAt >= STABLE_OPEN_MS) {
+      hub.attempt = 0;
+      hub.revoked = false;
+    }
     hub.openedAt = 0;
     const code = (e as CloseEvent | undefined)?.code;
     if (code === WS_CLOSE_KICKED) {
@@ -337,6 +353,7 @@ export function subscribeAppEvents(
       dial: null,
       paused: false,
       dead: false,
+      revoked: false,
     };
     hubs.set(key, hub);
     hub.subs.add(sub);

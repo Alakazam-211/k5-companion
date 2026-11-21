@@ -28,6 +28,7 @@ import {
   useCallRecording,
 } from "../callRecording";
 import { isAccessChanged } from "../voiceApi";
+import { startRecordingFeed } from "../recordingFeed";
 import { serverDisplayName } from "../../homeView";
 import { LayerSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
 import { useVoiceCall, type CallRoom } from "../voiceCall";
@@ -273,7 +274,9 @@ function BarTime({ scope }: { scope: RefObject<HTMLElement | null> }) {
 /** Re-reads the person's rights in the call's room (callRecording.ts): on
  *  connecting, after a room change (the plugin's room; asked of K2 by the
  *  room's slug when the rooms list knows it), whenever the recording
- *  changes, and on K2's `access_changed`. */
+ *  changes, on K2's `access_changed`, and (K2 0.46.17) on Sew's
+ *  `perms_changed` for the call's channel or space from the call's event
+ *  feed, open while connected (recordingFeed.ts). */
 function useRecordingRights(room: CallRoom): void {
   const connected = useVoiceCall((s) => s.phase === "connected");
   const pluginRoom = useCallRecording((s) => s.room) ?? room.roomId;
@@ -284,6 +287,11 @@ function useRecordingRights(room: CallRoom): void {
     const live = subscribeAppEvents(scopeFor(room.serverId), isAccessChanged, () => setAccess((n) => n + 1));
     return () => live.stop();
   }, [room.serverId]);
+  useEffect(() => {
+    if (!connected) return;
+    const feed = startRecordingFeed(room.serverId, () => setAccess((n) => n + 1));
+    return () => feed.stop();
+  }, [connected, room.serverId]);
   useEffect(() => {
     if (connected) void readRecordingRights(room.serverId, askRoom, pluginRoom);
   }, [connected, room.serverId, askRoom, pluginRoom, recordingId, access]);

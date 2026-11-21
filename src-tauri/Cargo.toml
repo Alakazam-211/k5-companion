@@ -76,6 +76,11 @@ tauri-plugin-sew-voice = { version = "0.9.2", default-features = false, features
 sew-call-client = { version = "0.9.2", default-features = false, features = ["mobile"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = "2"
+# The call's event feed (src/voice/feed.rs, K2 0.46.17): reqwest's HTTP/1
+# upgrade, then tungstenite on the upgraded stream (no TLS of its own).
+tokio-tungstenite = { version = "0.26", default-features = false }
+futures-util = "0.3"
+tokio = { version = "1", features = ["time"] }
 
 # src/voice.rs's tests: the DeepFilterNet3 weights' pinned sha256, which
 # scripts/fetch-dfn3.sh must match (the same sew-noise the plugin uses).
