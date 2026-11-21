@@ -94,13 +94,16 @@ export async function confirmStart(
   scope: ServerScope,
   action: string,
   secretId: string
-): Promise<ConfirmResult<{ methods: string[]; expiresIn: number }>> {
+): Promise<ConfirmResult<{ methods: string[]; expiresIn: number; confirmText: string | null }>> {
   try {
     const r = await post(scope, "/cli/vault/confirm/start", { action, secretId });
     if (!r.ok) return mapFailure(r.status, r.text);
     const j = JSON.parse(r.text || "{}") as Record<string, unknown>;
     const methods = Array.isArray(j.methods) ? j.methods.filter((m): m is string => typeof m === "string") : [];
-    return { ok: true, data: { methods, expiresIn: typeof j.expiresIn === "number" ? j.expiresIn : 60 } };
+    // The server's exact wording of the step (K2 0.46.17); the sheet shows
+    // it in place of the card's headline when present.
+    const confirmText = str(j.confirmText).trim() || null;
+    return { ok: true, data: { methods, expiresIn: typeof j.expiresIn === "number" ? j.expiresIn : 60, confirmText } };
   } catch {
     return { ok: false, code: "network", text: confirmErrorText("network") };
   }

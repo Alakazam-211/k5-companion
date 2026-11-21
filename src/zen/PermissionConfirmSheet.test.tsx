@@ -128,6 +128,17 @@ describe("confirm sheet", () => {
     }
   });
 
+  it("shows the server's confirmText in place of the headline when present", async () => {
+    tauriFetch.mockImplementation(async () =>
+      res(200, { methods: ["connect-password"], expiresIn: 60, confirmText: "Reveal STRIPE_KEY (server scope) in your terminal." })
+    );
+    render(
+      <PermissionConfirmSheet scope={scopeFor("s1")} action="vault-owner-confirm" requestId="pr_z" headline="The card headline" onConfirmed={vi.fn()} onCancel={vi.fn()} />
+    );
+    await screen.findByTestId("permission-confirm-password");
+    expect(screen.getByTestId("permission-confirm-headline").textContent).toBe("Reveal STRIPE_KEY (server scope) in your terminal.");
+  });
+
   it("draws only the listed method: connect-password alone never offers the vault password", async () => {
     server(() => res(200, { token: "t" }), ["connect-password"]);
     render(

@@ -45,6 +45,7 @@ export function PermissionConfirmSheet({ scope, action, requestId, headline, onC
   const [phase, setPhase] = useState<Phase>({ kind: "starting" });
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [confirmText, setConfirmText] = useState<string | null>(null);
   const input = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -55,6 +56,7 @@ export function PermissionConfirmSheet({ scope, action, requestId, headline, onC
         setPhase({ kind: "unavailable", text: r.text });
         return;
       }
+      setConfirmText(r.data.confirmText);
       const method = pickConfirmMethod(r.data.methods);
       setPhase(method ? { kind: "ready", method } : { kind: "unavailable", text: confirmErrorText("unavailable") });
     });
@@ -127,7 +129,7 @@ export function PermissionConfirmSheet({ scope, action, requestId, headline, onC
       >
         <h2 className="text-[17px] font-semibold text-center">Confirm to allow</h2>
         <p className="text-[14px] text-center" style={{ color: MUTED, lineHeight: 1.4 }} data-testid="permission-confirm-headline">
-          {headline}
+          {confirmText ?? headline}
         </p>
         {phase.kind === "starting" ? (
           <p className="text-[14px] text-center" style={{ color: MUTED }}>
