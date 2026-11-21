@@ -103,6 +103,17 @@ describe("confirm sheet", () => {
     expect(screen.queryByTestId("permission-confirm-password")).toBeNull();
   });
 
+  it("sits in the visible viewport (above the keyboard), not the whole layout", async () => {
+    server(() => res(200, {}), ["local-auth"]);
+    render(
+      <PermissionConfirmSheet scope={scopeFor("s1")} action="x" requestId="pr_3" headline="x" onConfirmed={vi.fn()} onCancel={vi.fn()} />
+    );
+    const overlay = screen.getByTestId("permission-confirm");
+    expect(overlay.className).not.toContain("inset-0");
+    expect(overlay.style.height).toBe(`${window.innerHeight}px`);
+    expect(overlay.style.top).toBe("0px");
+  });
+
   it("method choice: login password first, then vault password", () => {
     expect(pickConfirmMethod(["vault-password", "connect-password"])).toBe("connect-password");
     expect(pickConfirmMethod(["vault-password"])).toBe("vault-password");

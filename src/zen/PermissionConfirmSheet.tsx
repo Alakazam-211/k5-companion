@@ -17,6 +17,7 @@ import {
   pickConfirmMethod,
 } from "../api/permissionConfirm";
 import { useBackHandler } from "../lib/androidBack";
+import { useViewport } from "../lib/useViewportHeight";
 
 const MUTED = "var(--color-text-muted)";
 
@@ -40,6 +41,7 @@ type Phase =
 
 export function PermissionConfirmSheet({ scope, action, requestId, headline, onConfirmed, onCancel }: PermissionConfirmProps) {
   useBackHandler(true, onCancel);
+  const vp = useViewport();
   const [phase, setPhase] = useState<Phase>({ kind: "starting" });
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -96,8 +98,11 @@ export function PermissionConfirmSheet({ scope, action, requestId, headline, onC
 
   return createPortal(
     <div
-      className="fixed inset-0 flex items-end justify-center"
-      style={{ background: "var(--color-scrim)", zIndex: 60, fontFamily: "var(--zen-font)" }}
+      // Sized to the visible viewport (as GitAccessSetupSheet), so the
+      // sheet sits on the keyboard's top edge and the password field and
+      // buttons stay in view while typing.
+      className="fixed inset-x-0 flex items-end justify-center"
+      style={{ top: vp.offsetTop, height: vp.height, background: "var(--color-scrim)", zIndex: 60, fontFamily: "var(--zen-font)" }}
       data-testid="permission-confirm"
       onClick={(e) => {
         if (e.target === e.currentTarget && !busy) onCancel();
