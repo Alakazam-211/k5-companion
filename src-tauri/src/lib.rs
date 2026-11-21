@@ -2054,6 +2054,25 @@ fn voice_screen(_app: tauri::AppHandle) -> serde_json::Value {
     }
 }
 
+/// The call screen's self-view tile is shown (`tile`) and your camera is on
+/// or paused (`camera`): the native self-view's sink opens while both are
+/// true in a call (voice/self_view.rs). Answers whether this shell draws the
+/// self-view natively (iOS); false elsewhere, where the page keeps its own.
+#[tauri::command]
+fn voice_self_view(_app: tauri::AppHandle, tile: bool, camera: bool) -> bool {
+    #[cfg(target_os = "ios")]
+    {
+        use tauri::Manager;
+        voice::set_self_view(&_app.state::<voice::Native>(), tile, camera);
+        return true;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (tile, camera);
+        false
+    }
+}
+
 /// "Join with camera": the voice plugin's join with the camera on, as a
 /// video call in CallKit. Rejects as the plugin's `join` does
 /// (`{code, detail}`); `video_unsupported` off iOS.
@@ -2200,6 +2219,7 @@ pub fn run() {
             voice_join_camera,
             voice_pip_speaker,
             voice_screen,
+            voice_self_view,
             voice_feed_open,
             voice_feed_close
         ])

@@ -130,6 +130,7 @@ class K2PushPlugin: Plugin {
   @objc public override func load(webview: WKWebView) {
     tapDelegate.plugin = self
     if #available(iOS 15.0, *) { K2PiP.shared.webView = webview }
+    K2SelfView.shared.webView = webview
     // The call shim's events: to Rust (`voiceWatch`'s channel), which acts
     // on them through the voice engine, and to the UI as `call`.
     if #available(iOS 14.0, *) {
@@ -511,7 +512,10 @@ class K2PushPlugin: Plugin {
       }
     case "report":
       shim.report(state: args.state ?? "", reason: args.reason, video: args.video)
-      if args.state == "ended" { k2PiPCallEnded() }
+      if args.state == "ended" {
+        k2PiPCallEnded()
+        k2SelfViewCallEnded()
+      }
       invoke.resolve(["ok": true])
     case "mute":
       shim.setMuted(args.on ?? false)
@@ -522,6 +526,7 @@ class K2PushPlugin: Plugin {
     case "end":
       shim.end()
       k2PiPCallEnded()
+      k2SelfViewCallEnded()
       invoke.resolve(["ok": true])
     case "speaker":
       invoke.resolve(["ok": shim.setSpeaker(args.on ?? false), "route": K2CallShim.currentRoute()])
@@ -572,6 +577,15 @@ class K2PushPlugin: Plugin {
         invoke.resolve(
           K2PiP.shared.setTile(
             rect, radius: CGFloat(args.radius ?? 0), corners: K2PiP.cornerMask(args.corners), motion: motion))
+      }
+    case "selfViewFrame":
+      // The native self-view (K2SelfView): your camera's tile at `{x, y, w,
+      // h, radius}` in the webview's points; `visible: false` hides it.
+      let rect: CGRect? =
+        args.visible == true
+        ? CGRect(x: args.x ?? 0, y: args.y ?? 0, width: args.w ?? 0, height: args.h ?? 0) : nil
+      DispatchQueue.main.async {
+        invoke.resolve(K2SelfView.shared.setTile(rect, radius: CGFloat(args.radius ?? 0)))
       }
     case "haptic":
       // The mini video tile landing in its corner: a light tap. `state:
@@ -1336,7 +1350,7 @@ private struct CallOpArgs: Decodable {
   let video: Bool?
   // `copyText`
   let text: String?
-  // `pipFrame`
+  // `pipFrame`, `selfViewFrame`
   let x: Double?
   let y: Double?
   let w: Double?
