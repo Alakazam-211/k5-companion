@@ -154,6 +154,11 @@ to the above copyright notice and this permission notice being
 included in all copies or substantial portions of the Software.
 
 Pure + Node-testable (scripts/test-terminal-keys.mjs).
+The sticky Ctrl key (AccessoryBar's `Ctrl`): tap it, then the next
+character typed on the iOS keyboard becomes its control byte. Letters
+are case-insensitive (Ctrl+b = Ctrl+B = 0x02, tmux's prefix); these
+are the standard non-letter extras. `-` is in for `_` because `_`
+sits behind the iOS symbols page.
 ── KeyboardEvent.key → PTY bytes (terminal-live-input.ts port) ──
 
 Why Enter is ABSENT: Enter stays on the capture's own keydown handler
