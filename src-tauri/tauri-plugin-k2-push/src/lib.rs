@@ -191,6 +191,49 @@ pub mod pip {
     }
 }
 
+/// The native self-view's frames (K2SelfView.swift's `@_cdecl` entry
+/// points): your own camera, straight from Sew's `local:camera` native sink,
+/// for a display layer over the call screen's tile. Called on the sink's
+/// thread, never the main one. No-ops off iOS.
+pub mod selfview {
+    #[cfg(target_os = "ios")]
+    extern "C" {
+        fn k2_self_view_frame(buffer: *mut std::ffi::c_void, mirror: bool, discontinuity: bool, pts_90k: i64);
+        fn k2_self_view_flush(remove_image: bool);
+    }
+
+    /// One camera frame: its CVPixelBufferRef, borrowed for the call only.
+    /// Swift takes its own retain (ARC, released once the layer no longer
+    /// needs it) before it returns, so the caller's frame may go right after.
+    /// `mirror`: show it flipped left to right (the front camera).
+    /// `discontinuity`: flush the layer first (an open, a pause, a switch).
+    pub fn frame(buffer: *mut std::ffi::c_void, mirror: bool, discontinuity: bool, pts_90k: i64) {
+        if buffer.is_null() {
+            return;
+        }
+        #[cfg(target_os = "ios")]
+        // SAFETY: the caller's frame keeps `buffer` alive during the call;
+        // Swift retains it before returning and never writes to it.
+        unsafe {
+            k2_self_view_frame(buffer, mirror, discontinuity, pts_90k)
+        }
+        #[cfg(not(target_os = "ios"))]
+        let _ = (mirror, discontinuity, pts_90k);
+    }
+
+    /// Drop what the layer holds (`remove_image`: show nothing, the page's
+    /// tile shows through).
+    pub fn flush(remove_image: bool) {
+        #[cfg(target_os = "ios")]
+        // SAFETY: no arguments to keep.
+        unsafe {
+            k2_self_view_flush(remove_image)
+        }
+        #[cfg(not(target_os = "ios"))]
+        let _ = remove_image;
+    }
+}
+
 #[cfg(desktop)]
 use desktop::K2Push;
 #[cfg(mobile)]

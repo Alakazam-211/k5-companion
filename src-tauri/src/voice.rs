@@ -12,6 +12,8 @@
 //!   calls. Native both ways, so a call keeps working with the webview asleep.
 //! - [`PipSink`]: while the call has video, Sew's native sink on the active
 //!   speaker feeds the picture in picture (K2PiP.swift).
+//! - [`self_view`]: your own camera on the call screen's tile, from Sew's
+//!   `local:camera` native sink into K2SelfView.swift (about one frame late).
 //! - [`ScreenRing`]: the iPhone screen share. Once a call is connected the
 //!   broadcast extension's ring (K2Broadcast) is armed in the App Group's
 //!   container, and the share's state goes to the call screen.
@@ -44,6 +46,9 @@ use tauri_plugin_sew_voice::{ConsentAsk, ConsentPrompt, ErrorInfo};
 /// The call's event feed for Sew's `perms_changed` (K2 0.46.17).
 pub mod feed;
 
+/// The native self-view (Sew's `local:camera` sink into K2SelfView.swift).
+pub mod self_view;
+
 /// The longest a daemon takes to answer a join (K2 desktop's figure: a
 /// reconnecting lane, the member gate and Sew's answer add up to 51 s).
 const JOIN_TIMEOUT: Duration = Duration::from_secs(55);
@@ -70,6 +75,8 @@ pub struct Native {
     pip: Arc<OnceLock<mpsc::Sender<ToSink>>>,
     /// The CallKit thread ([`callkit_loop`]), for a join with the camera.
     shim: Arc<OnceLock<mpsc::Sender<ToShim>>>,
+    /// The self-view's thread ([`self_view::self_loop`]).
+    self_view: Arc<OnceLock<mpsc::Sender<self_view::ToSelf>>>,
     /// Whom the picture shows (the sink's last `Switched`), for a call
     /// screen opened after the event went by.
     speaker: Arc<Mutex<Value>>,
@@ -162,6 +169,13 @@ impl Native {
         }
     }
 
+    /// To the self-view's thread. Only queues: safe in a listener.
+    fn to_self_view(&self, msg: self_view::ToSelf) {
+        if let Some(tx) = self.self_view.get() {
+            let _ = tx.send(msg);
+        }
+    }
+
     /// The Keychain's token for `server`, off the async runtime's workers.
     async fn token(&self, server: &str) -> Option<String> {
         let app = self.app()?;
@@ -190,6 +204,7 @@ pub fn plugin(native: &Native) -> tauri::plugin::TauriPlugin<Wry> {
         .name("k2-pip".into())
         .spawn(move || pip_loop(&mut pip_sink, pip_rx))
         .expect("the PiP thread starts");
+    let _ = native.self_view.set(self_view::start(native));
     // Noise removal (feature `dfn3`): at start the plugin checks
     // DeepFilterNet3's weights (their pinned sha256, on a thread of its own)
     // at its default place, `dfn3/dfn3_ll.nnef.tar` in the app's resource
@@ -297,6 +312,14 @@ pub fn set_hosts(native: &Native, hosts: HashMap<String, String>) {
         }
         native.save_installs();
     });
+}
+
+/// The call screen's self-view tile (`tile`: shown) and your camera (`camera`:
+/// on or paused), from the webview whenever either changes. The native
+/// self-view's sink is open while both are true in a call.
+pub fn set_self_view(native: &Native, tile: bool, camera: bool) {
+    native.to_self_view(self_view::ToSelf::Tile(tile));
+    native.to_self_view(self_view::ToSelf::Camera(camera));
 }
 
 /// A join with the camera on ("Join with camera"): the system call starts as
@@ -896,6 +919,7 @@ impl VoiceListener for CallKitBridge {
         if matches!(state.state, CallState::Ended { .. } | CallState::Idle) {
             self.native.to_pip(ToSink::Ended);
         }
+        self.native.to_self_view(self_view::ToSelf::Call(self_view::in_call(&state.state)));
         let _ = self.tx.send(ToShim::State(state.clone()));
         self.native.note(&state_line(&state.state));
         let _ = self.watch.send(Watched::State(state.state.clone()));

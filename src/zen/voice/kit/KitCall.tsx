@@ -30,7 +30,8 @@ import {
 import { isAccessChanged } from "../voiceApi";
 import { startRecordingFeed } from "../recordingFeed";
 import { serverDisplayName } from "../../homeView";
-import { LayerSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
+import { probeNativeSelfView, useNativeSelfView } from "../nativeSelfView";
+import { LayerSlot, NativeSelfSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
 import { useVoiceCall, type CallRoom } from "../voiceCall";
 import { occupantByMember, roomByKey, useVoiceNames } from "../voiceNames";
 import { recordUnavailableText, type VoiceRoom } from "../voiceWire";
@@ -50,7 +51,10 @@ import { kitChannelId, kitRoomOf, kitSelfId, note, sewKit } from "./sewKit";
 //     are here only, never on the floating call tile;
 //   - your own tile, while your camera is on: `SelfView` in its rect (the
 //     kit's `local:camera` sink, mirrored for the front camera, "Camera
-//     paused" in the background). Never the native layer, never PiP.
+//     paused" in the background). Never the native layer, never PiP. On
+//     iOS the native self-view draws it instead (nativeSelfView.ts: Swift's
+//     own display layer over the tile's box, from Sew's `local:camera`
+//     native sink, about one frame behind the camera); the box stays here.
 // The phone's own parts stay around it in VoiceRooms.tsx: the recording
 // notice (ConsentSheet, wired to CallKit and the background notice; the
 // kit's RecordingConsent is never placed), and the floating call tile
@@ -128,10 +132,13 @@ export function AvatarNote({ memberId, video }: { memberId: string; video: Layer
   );
 }
 
-/** Your own tile's video rect while your camera is on. */
-function Self({ handle, video }: { handle: HostTileInfo["handle"]; video: LayerVideo }) {
-  const paused = useLayerVideo(video, (v) => v.selfState() === "paused");
-  return <SelfView handle={handle} paused={paused} />;
+/** Your own tile's video rect while your camera is on: the native self-view
+ *  where the shell has one (no webview sink then), else the kit's sink. */
+export function Self({ handle, video, covered }: { handle: HostTileInfo["handle"]; video: LayerVideo; covered: boolean }) {
+  const camera = useLayerVideo(video, (v) => v.selfState());
+  const native = useNativeSelfView((s) => s.available);
+  if (native) return <NativeSelfSlot camera={camera} covered={covered} />;
+  return <SelfView handle={handle} paused={camera === "paused"} />;
 }
 
 /** Names for the kit, from what the phone knows: the rooms lists (each
@@ -209,7 +216,9 @@ function People({ covered, video }: { covered: boolean; video: LayerVideo }) {
       {live && !hosted ? <VideoTile covered={covered} /> : null}
       <CallView
         channelId={v.channelId}
-        renderTile={(t: HostTileInfo) => (t.participant.local ? <Self handle={t.handle} video={video} /> : <LayerSlot />)}
+        renderTile={(t: HostTileInfo) =>
+          t.participant.local ? <Self handle={t.handle} video={video} covered={covered} /> : <LayerSlot />
+        }
         // The layer goes on someone else's tile only: never yours.
         onTileRect={(t: HostTileInfo, rect) => {
           if (!t.participant.local) place(rect);
@@ -388,6 +397,8 @@ export default function KitCall() {
   useEffect(() => {
     if (key) kit.controller.dismissNotice();
   }, [key, kit]);
+  // Whether this shell draws your self-view natively (asked once, iOS only).
+  useEffect(() => probeNativeSelfView(), []);
   const ui = useMemo<VoiceUi>(() => {
     const username = (id: string) => {
       const s = servers.find((x) => x.id === id);
