@@ -54,6 +54,9 @@ export function sameMessage(a: ThreadMessage, b: ThreadMessage): boolean {
     !!a.deleted === !!b.deleted &&
     (a.readSeq ?? null) === (b.readSeq ?? null) &&
     sameChoice(a.choice, b.choice) &&
+    // A secret card's status, reference and closing (names only, never a value).
+    JSON.stringify(a.secret ?? null) === JSON.stringify(b.secret ?? null) &&
+    !!a.unsupportedCard === !!b.unsupportedCard &&
     attachmentsKey(a.files) === attachmentsKey(b.files)
   );
 }
