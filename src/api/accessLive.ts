@@ -33,9 +33,13 @@ export const ACCESS_DEBOUNCE_MS = 300;
 /** The daemon's close for a removed, disabled or signed-out login. */
 export const ACCESS_CLOSE_REVOKED = 4003;
 
-/** `{"kind":"access_changed"}` (any extra fields ignored). */
+/** `{"kind":"access_changed"}` on sessions/events and voice/events, or
+ *  `{"type":"access_changed"}` on the Home chat socket, whose frames use
+ *  "type" (K2 0.46.17). Any extra fields are ignored. */
 export function isAccessChangedFrame(frame: unknown): boolean {
-  return !!frame && typeof frame === "object" && (frame as { kind?: unknown }).kind === "access_changed";
+  if (!frame || typeof frame !== "object") return false;
+  const f = frame as { kind?: unknown; type?: unknown };
+  return f.kind === "access_changed" || f.type === "access_changed";
 }
 
 const pending = new Map<string, ReturnType<typeof setTimeout>>();
