@@ -10,10 +10,8 @@ import { useWorkspacesStore } from "../stores/workspaces";
 import { TerminalView } from "../components/TerminalView";
 import { ensurePinnedChat, uploadFsBinary } from "../api/client";
 import { MessageComposer } from "../components/MessageComposer";
-import { AccessoryBar } from "../components/AccessoryBar";
-import { LiveInputCapture } from "../components/LiveInputCapture";
+import { TerminalDirectInput } from "../components/TerminalDirectInput";
 import { sendMessageToSession } from "../api/sendMessage";
-import type { LiveLocalEdit } from "../lib/liveInputText";
 import {
   modeFor,
   setSendMode,
@@ -219,9 +217,6 @@ export function ZenTerminal() {
   const sendInputRef = useRef<((text: string) => void) | null>(null);
   const reloadRef = useRef<(() => void) | null>(null);
   const captureFocusRef = useRef<(() => void) | null>(null);
-  const sendKeyRef = useRef<
-    ((bytes: string, localEdit?: LiveLocalEdit) => void) | null
-  >(null);
   const [reloading, setReloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState("");
 
@@ -594,17 +589,10 @@ export function ZenTerminal() {
             data-testid="zen-terminal-direct-bar"
             style={{ flexShrink: 0 }}
           >
-            <AccessoryBar
-              variant="zen"
-              onKey={(bytes, localEdit) => {
-                if (sendKeyRef.current) sendKeyRef.current(bytes, localEdit);
-                else sendInputRef.current?.(bytes);
-              }}
-            />
-            <LiveInputCapture
+            <TerminalDirectInput
               send={(bytes) => sendInputRef.current?.(bytes)}
               focusRef={captureFocusRef}
-              sendKeyRef={sendKeyRef}
+              sessionKey={terminalId}
             />
           </div>
         ) : (

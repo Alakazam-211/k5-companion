@@ -23,6 +23,13 @@ import type { LiveLocalEdit } from "../lib/liveInputText";
 //     scrolling the strip can never interrupt the PTY.
 // pointerdown/mousedown are preventDefaulted so a key tap never steals
 // focus from the hidden capture (the keyboard must stay up).
+//
+// Sticky Ctrl (when the owner passes onCtrlArmedChange): a `Ctrl` key
+// after Esc. A tap arms it (accent fill, aria-pressed) — no holding on a
+// touchscreen — and the next key typed on the iOS keyboard goes out as
+// its control byte (LiveInputCapture's pipeline does that part). A
+// second tap disarms. Any other key here sends its own bytes as always
+// and disarms Ctrl (no Ctrl+arrow). The owner holds the armed state.
 
 const REPEAT_DELAY_MS = 350;
 const REPEAT_INTERVAL_MS = 80;
@@ -57,6 +64,11 @@ interface Props {
    *  pill at the right end over a right-to-left progressive blur. Same
    *  press model; the default look is untouched. */
   variant?: "default" | "zen";
+  /** Sticky Ctrl is armed (the Ctrl key shows pressed). */
+  ctrlArmed?: boolean;
+  /** Show the sticky Ctrl key; called with the new armed state on a
+   *  Ctrl tap, and with false when another key fires while armed. */
+  onCtrlArmedChange?: (armed: boolean) => void;
 }
 
 // Zen hide-keyboard pill geometry. The pill floats over the right end
@@ -101,9 +113,22 @@ function localEditFor(k: TerminalAccessoryKey): LiveLocalEdit | undefined {
   return undefined;
 }
 
-export function AccessoryBar({ onKey, variant = "default" }: Props) {
+export function AccessoryBar({
+  onKey,
+  variant = "default",
+  ctrlArmed = false,
+  onCtrlArmedChange,
+}: Props) {
+  const ctrlRef = useRef({ armed: ctrlArmed, change: onCtrlArmedChange });
+  ctrlRef.current = { armed: ctrlArmed, change: onCtrlArmedChange };
+  // Every key's bytes go through here: a key fired while Ctrl is armed
+  // sends as it is and disarms Ctrl.
   const onKeyRef = useRef(onKey);
-  onKeyRef.current = onKey;
+  onKeyRef.current = (bytes, localEdit) => {
+    onKey(bytes, localEdit);
+    const ctrl = ctrlRef.current;
+    if (ctrl.armed) ctrl.change?.(false);
+  };
   // At most one held key; both timers die on any stop.
   const repeatRef = useRef<{
     delay: ReturnType<typeof setTimeout> | null;
@@ -132,6 +157,50 @@ export function AccessoryBar({ onKey, variant = "default" }: Props) {
 
   const zen = variant === "zen";
   const keys = TERMINAL_ACCESSORY_KEYS;
+  const keyClass = zen
+    ? "zen-glass zen-glass-pill text-[var(--text)] text-[13px] shrink-0 active:opacity-60"
+    : "border border-[var(--accent-dim)] bg-[var(--background)] text-[var(--text)] text-[12px] shrink-0";
+  const keyStyle: React.CSSProperties = {
+    // Size-to-content: full chord labels (Ctrl+C) widen the key.
+    // Classic: 44pt min is the touch-target floor. Zen: 32px pill.
+    minWidth: zen ? 40 : 44,
+    height: zen ? 32 : 44,
+    padding: "0 12px",
+    fontFamily: "inherit",
+    touchAction: "pan-x", // horizontal strip scroll stays native
+    userSelect: "none",
+    WebkitUserSelect: "none",
+  };
+
+  // Fires on CLICK like the chords (a strip scroll never toggles it).
+  const ctrlKey = onCtrlArmedChange ? (
+    <button
+      key="ctrl"
+      type="button"
+      data-k2-key="ctrl"
+      aria-label="Control"
+      aria-pressed={ctrlArmed}
+      data-armed={ctrlArmed || undefined}
+      onMouseDown={(e) => e.preventDefault()}
+      onPointerDown={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+      onClick={() => onCtrlArmedChange(!ctrlArmed)}
+      className={keyClass}
+      style={
+        ctrlArmed
+          ? {
+              ...keyStyle,
+              // The pressed modifier: the accent fill (Send's), on-accent ink.
+              background: "var(--color-accent-fill)",
+              borderColor: "var(--color-accent-fill)",
+              color: "var(--color-on-accent)",
+            }
+          : keyStyle
+      }
+    >
+      Ctrl
+    </button>
+  ) : null;
 
   const toolbar = (
     <div
@@ -149,7 +218,7 @@ export function AccessoryBar({ onKey, variant = "default" }: Props) {
         scrollbarWidth: "none",
       }}
     >
-      {keys.map((k) => (
+      {keys.flatMap((k) => [
         <button
           key={k.id}
           data-k2-key={k.id}
@@ -170,26 +239,13 @@ export function AccessoryBar({ onKey, variant = "default" }: Props) {
                 onPointerDown: (e: React.PointerEvent) => e.preventDefault(),
                 onClick: () => onKeyRef.current(k.bytes, localEditFor(k)),
               })}
-          className={
-            zen
-              ? "zen-glass zen-glass-pill text-[var(--text)] text-[13px] shrink-0 active:opacity-60"
-              : "border border-[var(--accent-dim)] bg-[var(--background)] text-[var(--text)] text-[12px] shrink-0"
-          }
-          style={{
-            // Size-to-content: full chord labels (Ctrl+C) widen the key.
-            // Classic: 44pt min is the touch-target floor. Zen: 32px pill.
-            minWidth: zen ? 40 : 44,
-            height: zen ? 32 : 44,
-            padding: "0 12px",
-            fontFamily: "inherit",
-            touchAction: "pan-x", // horizontal strip scroll stays native
-            userSelect: "none",
-            WebkitUserSelect: "none",
-          }}
+          className={keyClass}
+          style={keyStyle}
         >
           {renderKeyLabel(k.label)}
-        </button>
-      ))}
+        </button>,
+        ...(k.id === "escape" && ctrlKey ? [ctrlKey] : []),
+      ])}
     </div>
   );
 

@@ -178,6 +178,40 @@ export const TERMINAL_ACCESSORY_KEYS: TerminalAccessoryKey[] = [
   { id: 'backspace', label: '⌫', bytes: '\x7f', accessibilityLabel: 'Backspace', repeatable: true }
 ]
 
+// The sticky Ctrl key (AccessoryBar's `Ctrl`): tap it, then the next
+// character typed on the iOS keyboard becomes its control byte. Letters
+// are case-insensitive (Ctrl+b = Ctrl+B = 0x02, tmux's prefix); these
+// are the standard non-letter extras. `-` is in for `_` because `_`
+// sits behind the iOS symbols page.
+const STICKY_CTRL_EXTRAS: Record<string, string> = {
+  '@': '\x00',
+  ' ': '\x00',
+  '[': '\x1b',
+  '\\': '\x1c',
+  ']': '\x1d',
+  '^': '\x1e',
+  _: '\x1f',
+  '-': '\x1f',
+  '?': '\x7f'
+}
+
+/** The control byte the sticky Ctrl key turns `ch` (one typed
+ *  character) into, or null when Ctrl means nothing for it — the
+ *  caller then sends the character plainly. */
+export function stickyCtrlBytes(ch: string): string | null {
+  if (ch.length !== 1) {
+    return null
+  }
+  const code = ch.charCodeAt(0)
+  if (code >= 0x41 && code <= 0x5a) {
+    return String.fromCharCode(code - 0x40)
+  }
+  if (code >= 0x61 && code <= 0x7a) {
+    return String.fromCharCode(code - 0x60)
+  }
+  return STICKY_CTRL_EXTRAS[ch] ?? null
+}
+
 export function buildTerminalShortcutKey(
   binding: TerminalShortcutBinding
 ): TerminalShortcutBuildResult | null {
