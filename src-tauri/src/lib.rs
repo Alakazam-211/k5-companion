@@ -2079,6 +2079,32 @@ async fn voice_join_camera(
     }
 }
 
+/// Open the call's event feed on `server` (K2 0.46.17
+/// `/_k2/voice/sew/feed`, voice/feed.rs), closing any other: its number,
+/// whose `k2-voice://feed` events follow. `None` with no address or token
+/// for that server, and off iOS.
+#[tauri::command]
+async fn voice_feed_open(_app: tauri::AppHandle, server: String) -> Option<u64> {
+    #[cfg(target_os = "ios")]
+    {
+        use tauri::Manager;
+        let native = _app.state::<voice::Native>().inner().clone();
+        return voice::feed::open(&native, server).await;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = server;
+        None
+    }
+}
+
+/// Close the call's event feed. Nothing off iOS.
+#[tauri::command]
+fn voice_feed_close() {
+    #[cfg(target_os = "ios")]
+    voice::feed::close();
+}
+
 /// The last call events as text, for "Send call log" (codes only: no
 /// tokens, addresses or names). Empty off iOS.
 #[tauri::command]
@@ -2173,7 +2199,9 @@ pub fn run() {
             voice_note,
             voice_join_camera,
             voice_pip_speaker,
-            voice_screen
+            voice_screen,
+            voice_feed_open,
+            voice_feed_close
         ])
         .build(tauri::generate_context!())
         .expect("error while building K2 Companion");

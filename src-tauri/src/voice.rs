@@ -41,6 +41,9 @@ use tauri_plugin_sew_voice::{
 };
 use tauri_plugin_sew_voice::{ConsentAsk, ConsentPrompt, ErrorInfo};
 
+/// The call's event feed for Sew's `perms_changed` (K2 0.46.17).
+pub mod feed;
+
 /// The longest a daemon takes to answer a join (K2 desktop's figure: a
 /// reconnecting lane, the member gate and Sew's answer add up to 51 s).
 const JOIN_TIMEOUT: Duration = Duration::from_secs(55);

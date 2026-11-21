@@ -13,8 +13,11 @@
 //                  may be missing, re-pull what the room shows.
 //   - `recovered` — auto reconnect: the server answers again and its login
 //                  stands. Sockets waiting on a backoff reopen now.
+//   - `access`   — K2 0.46.17 `access_changed` on that server's sockets
+//                  (one per burst, api/accessLive.ts): re-read this login's
+//                  access (whoami, the chat gate; zen/accessLive.ts).
 
-export type ServerSignal = "kicked" | "signin" | "lagged" | "reopened" | "recovered";
+export type ServerSignal = "kicked" | "signin" | "lagged" | "reopened" | "recovered" | "access";
 type Listener = (serverId: string, signal: ServerSignal) => void;
 
 const listeners = new Set<Listener>();

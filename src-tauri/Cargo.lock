@@ -2913,6 +2913,7 @@ name = "k2so-companion"
 version = "4.3.1"
 dependencies = [
  "base64 0.22.1",
+ "futures-util",
  "objc2",
  "reqwest 0.12.28",
  "serde",
@@ -2925,6 +2926,8 @@ dependencies = [
  "tauri-plugin-k2-push",
  "tauri-plugin-sew-voice",
  "tauri-plugin-store",
+ "tokio",
+ "tokio-tungstenite",
  "url",
 ]
 

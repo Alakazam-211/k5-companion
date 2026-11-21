@@ -27,18 +27,21 @@
 // unusable parks the socket until the gate opens; otherwise it keeps
 // trying once a minute (the phone never gives up for good). The backoff
 // starts over once a socket has stayed open 30 s. 4003 asks whoami on THIS
-// server (never deleting the token): a dead login stops the socket and
-// signals `signin`. Dials go through the dial queue; the app's background
-// closes the socket and the foreground reopens it; the `recovered` server
-// signal redials at once.
+// server (never deleting the token): a dead login, or a 401/403 whoami
+// could not explain, stops the socket and signals `signin`; a second 4003
+// before the socket stayed open stops it too (api/accessLive.ts). An
+// `access_changed` frame here (K2 0.46.17, if the platform sends it on this
+// socket) asks for the same one re-read as the app socket's copy. Dials
+// go through the dial queue; the app's background closes the socket and
+// the foreground reopens it; the `recovered` server signal redials at once.
 
 import type { ServerScope } from "./scope";
 import { queueDial, type DialTicket } from "./dialQueue";
-import { emitServerSignal, onServerSignal } from "./serverSignals";
+import { onServerSignal } from "./serverSignals";
 import { inBackground, onAppLifecycle } from "../lib/appLifecycle";
 import { jittered, STABLE_OPEN_MS } from "../lib/reconnect";
 import { openSocket } from "../lib/netStats";
-import { revive } from "../lib/revive";
+import { checkAfterRevoked, isAccessChangedFrame, noteAccessChanged } from "./accessLive";
 import {
   arr,
   idOf,
@@ -234,6 +237,8 @@ interface Hub {
   dead: boolean;
   stopped: boolean;
   checking: boolean;
+  /** Closed 4003 and not open long since: a second 4003 stops it. */
+  revoked: boolean;
   unhook: Array<() => void>;
   send: HomeChatEventsSend;
 }
@@ -316,16 +321,18 @@ function afterDeadTry(hub: Hub): void {
 }
 
 /** 4003: whoami on this server first (a background socket never deletes
- *  the token). A login that still stands reconnects. */
+ *  the token). A login that still stands reconnects, unless this socket
+ *  was refused 4003 again without staying open. */
 async function afterRevoked(hub: Hub): Promise<void> {
   if (hub.checking) return;
   hub.checking = true;
+  const repeat = hub.revoked;
+  hub.revoked = true;
   try {
-    const outcome = await revive(hub.scope, { background: true });
+    const verdict = await checkAfterRevoked(hub.scope, { repeat });
     if (hub.stopped) return;
-    if (outcome === "signin-required" || outcome === "not-applicable") {
+    if (verdict !== "reconnect") {
       hub.dead = true;
-      emitServerSignal(hub.scope.id, "signin");
       return;
     }
     schedule(hub, jittered(homeChatRetryMs(hub.attempt++)));
@@ -385,7 +392,18 @@ function dialNow(hub: Hub): WebSocket | "failed" | null {
   };
   sock.onmessage = (e: MessageEvent) => {
     if (hub.stopped || hub.ws !== sock) return;
-    const f = parseHomeChatFrame(typeof e.data === "string" ? e.data : String(e.data));
+    const raw = typeof e.data === "string" ? e.data : String(e.data);
+    if (raw.includes("access_changed")) {
+      try {
+        if (isAccessChangedFrame(JSON.parse(raw))) {
+          noteAccessChanged(hub.scope.id);
+          return;
+        }
+      } catch {
+        /* not JSON: parseHomeChatFrame drops it */
+      }
+    }
+    const f = parseHomeChatFrame(raw);
     if (!f) return;
     if (f.type === "hello") noteHomeChatLink(hub.scope, { flags: f.flags, chat: f.chat });
     else if (f.type === "status") noteHomeChatLink(hub.scope, { chat: f.chat });
@@ -407,7 +425,10 @@ function dialNow(hub: Hub): WebSocket | "failed" | null {
       afterDeadTry(hub);
       return;
     }
-    if (stable) hub.attempt = 0;
+    if (stable) {
+      hub.attempt = 0;
+      hub.revoked = false;
+    }
     if (e?.code === HOME_CHAT_CLOSE_REVOKED) {
       void afterRevoked(hub);
       return;
@@ -450,6 +471,7 @@ function makeHub(scope: ServerScope): Hub {
     dead: false,
     stopped: false,
     checking: false,
+    revoked: false,
     unhook: [],
     send: (text) => {
       const s = hub.ws;

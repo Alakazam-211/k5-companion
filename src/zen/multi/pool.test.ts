@@ -271,3 +271,48 @@ describe("createPool", () => {
     expect(h.pool.entry("b")).toBeUndefined();
   });
 });
+
+describe("access_changed (K2 0.46.17): a fresh check", () => {
+  it("runs one more full check after one already in flight, and reads the new role", async () => {
+    let role = "member";
+    let whoamis = 0;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const h = harness({
+      get: vi.fn(async (_s: unknown, path: string) => {
+        if (path.includes("whoami")) {
+          whoamis += 1;
+          const r = role;
+          await gate;
+          return ok({ ...WHO, role: r });
+        }
+        return ok(SUMMARY);
+      }),
+    });
+    const first = h.pool.check("b");
+    await Promise.resolve();
+    role = "voice_chat"; // the change lands while the first read is out
+    const fresh = h.pool.check("b", { fresh: true });
+    release();
+    await first;
+    const after = await fresh;
+    expect(whoamis).toBe(2);
+    expect(after?.role).toBe("voice_chat");
+    expect(roleAllowsRoom(after?.role ?? null)).toBe(false);
+    // Without `fresh`, a check joins the one in flight.
+    const a = h.pool.check("b");
+    const b = h.pool.check("b");
+    await Promise.all([a, b]);
+    expect(whoamis).toBe(3);
+  });
+
+  it("a forced password change turns the row to rotate-required", async () => {
+    const h = harness({
+      get: vi.fn(async (_s: unknown, path: string) =>
+        path.includes("whoami") ? ok({ ...WHO, mustChangePassword: true }) : ok(SUMMARY)
+      ),
+    });
+    const e = await h.pool.check("b", { fresh: true });
+    expect(e?.auth).toBe("rotate-required");
+  });
+});
