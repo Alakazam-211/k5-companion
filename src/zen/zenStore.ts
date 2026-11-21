@@ -308,6 +308,9 @@ type ZenState = {
   /** Dismiss a waiting card (K2 0.46.11 `POST /cli/thread/void` + reason).
    *  Resolves null when done, else the error to show on the card. */
   dismissCard: (messageId: string, reason?: string) => Promise<string | null>;
+  /** A secret card was saved on its server: its status and `k2v://`
+   *  reference (never the value). The live frame brings the daemon's copy. */
+  secretCardSaved: (messageId: string, status: string, ref: string | null) => void;
   ingestThreadRaw: (raw: ThreadItem) => void;
   refreshOpenThread: () => Promise<void>;
   /** Last-message unix seconds, keyed `t:<addr>` / `g:<groupId>`. Null = fetched empty. */
@@ -2473,7 +2476,10 @@ export const useZenStore = create<ZenState>((set, get) => ({
     const addr = get().threadAddr;
     if (!isSendableAddr(addr)) return null;
     const msg = get().thread.find((m) => m.id === id);
-    if (!msg?.choice || !cardOpen(msg.choice)) return null;
+    // A question card, or a secret card still waiting (the desktop's
+    // secret card declines through the same void).
+    const secretOpen = !!msg?.secret && msg.secret.status === "pending";
+    if (!msg || (!secretOpen && (!msg.choice || !cardOpen(msg.choice)))) return null;
     const why = (reason ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, CARD_DISMISS_REASON_MAX);
     const gen = get().threadGen;
     const failed = "K2 couldn't dismiss this card.";
@@ -2484,8 +2490,20 @@ export const useZenStore = create<ZenState>((set, get) => ({
       // Closed here at once; the live frame (or the next read) brings the
       // daemon's own copy (who, the stored reason).
       const username = zenScope().username();
+      const closedBy = { kind: "user", login: username || "you" };
       const thread = get().thread.map((m) =>
-        m.id === id && m.choice
+        m.id === id && m.secret
+          ? {
+              ...m,
+              secret: {
+                ...m.secret,
+                status: "voided",
+                closedAs: "dismissed" as const,
+                closeReason: why || null,
+                answeredBy: closedBy,
+              },
+            }
+          : m.id === id && m.choice
           ? {
               ...m,
               choice: {
@@ -2493,7 +2511,7 @@ export const useZenStore = create<ZenState>((set, get) => ({
                 status: "voided",
                 closedAs: "dismissed" as const,
                 ...(why ? { closeReason: why } : {}),
-                closedBy: { kind: "user", login: username || "you" },
+                closedBy,
               },
             }
           : m
@@ -2504,6 +2522,28 @@ export const useZenStore = create<ZenState>((set, get) => ({
       if (get().threadGen !== gen) return null;
       return e instanceof Error && e.message ? e.message : failed;
     }
+  },
+
+  secretCardSaved: (messageId, status, ref) => {
+    const id = messageId.trim();
+    if (!id) return;
+    const username = zenScope().username();
+    // Only the card's status, its reference and who saved it: the answer
+    // keeps nothing else (never the value).
+    const thread = get().thread.map((m) =>
+      m.id === id && m.secret
+        ? {
+            ...m,
+            secret: {
+              ...m.secret,
+              status: status || "set",
+              ...(ref ? { ref } : {}),
+              answeredBy: m.secret.answeredBy ?? { kind: "user", login: username || "you" },
+            },
+          }
+        : m
+    );
+    set({ thread });
   },
 
   ingestThreadRaw: (raw) => {

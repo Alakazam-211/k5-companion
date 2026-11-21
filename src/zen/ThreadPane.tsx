@@ -61,6 +61,7 @@ import { StubMark } from "./StubMark";
 import {
   DELETED_TEXT,
   cardAuthorLabel,
+  cardFallback,
   cardOpen,
   closedCardLine,
   daemonClosedCard,
@@ -69,6 +70,7 @@ import {
   type ThreadMessage,
 } from "./threadModel";
 import { CardDismiss } from "./CardDismiss";
+import { CardFallback, SecretCard } from "./SecretCard";
 import { BookmarkPlusIcon, ReplyIcon } from "./icons";
 import { formatThreadReply, parseThreadReply, threadReplyFirstLine, type ThreadReplyTarget } from "./threadReply";
 import { MESSAGE_HOLD_ATTR, useMessageHold, useMessageSelection } from "./stash/useMessageHold";
@@ -410,6 +412,9 @@ const Bubble = memo(function Bubble({
 }) {
   const secret = m.kind === "secret";
   const choice = secret ? null : m.choice;
+  // A card this app can't draw, or a message that would draw nothing:
+  // the "open it in the K2 desktop app" card (never a silent blank).
+  const fallback = cardFallback(m);
   const answered =
     choice != null && choice.answer != null && String(choice.answer) !== "";
   // K2 0.46.11: a card a person dismissed or its agent withdrew (or one
@@ -457,7 +462,9 @@ const Bubble = memo(function Bubble({
         // holds. A card's words too (the list around them never selects).
         style={SELECTABLE}
       >
-      {choice?.permission ? (
+      {m.secret ? (
+        <SecretCard m={{ ...m, secret: m.secret }} canAnswer={canAnswer && !answerHeld} />
+      ) : choice?.permission ? (
         <ThreadPermissionCard card={choice.permission} id={m.id} enabled={canAnswer && !answerHeld} />
       ) : choice ? (
         <div>
@@ -555,6 +562,7 @@ const Bubble = memo(function Bubble({
           ) : null}
         </>
       )}
+      {fallback && !m.secret ? <CardFallback agent={m.from} /> : null}
       </div>
     </div>
   );
@@ -734,7 +742,7 @@ const ThreadRow = memo(function ThreadRow({
       </div>
     );
   }
-  const wordless = !m.text.trim() && !m.choice;
+  const wordless = !m.text.trim() && !m.choice && !m.secret && !m.approval && !cardFallback(m);
   const bubble = !(files && wordless);
   // Someone else's row (the sender column, on or off).
   const column = pictureOn !== undefined;
@@ -2988,7 +2996,7 @@ export function ThreadPane({
                 // Files ride Thread messages only (not project chat lines,
                 // not this phone's own optimistic sends).
                 const files = filesOn && !out && !groupId && m.files?.length ? m.files : null;
-                const wordless = !m.text.trim() && !m.choice;
+                const wordless = !m.text.trim() && !m.choice && !m.secret && !m.approval && !cardFallback(m);
                 // Files-only, on a server without the feature: nothing to draw.
                 if (wordless && !files && !out && m.files?.length) return null;
                 // A card the daemon closed by itself: not drawn (K2 isVoidedHitl).
