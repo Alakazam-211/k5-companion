@@ -1276,11 +1276,13 @@ html, body, #root {
 }
 /* Inside a Thread bubble the words take the bubble's own colour (your
    bubble's on-accent ink, the agent bubble's primary text): Dusk's gold
-   carries dark ink, Veil's agent bubble is light. A link in your own bubble
+   carries dark ink, Veil's agent bubble is light. Lists too: .markdown-content
+   gives ul/ol the secondary text colour, which a list item would inherit
+   (light lists on Dusk's gold). A link in your own bubble
    would be accent on accent, so it takes the words' colour, underlined. Tickets mark
    their rows data-mine="1" or "0", so "0" is not yours. */
 [data-bubble-body] .chat-markdown,
-[data-bubble-body] .chat-markdown :is(p, li, strong, em, h1, h2, h3, h4, blockquote, th, td) {
+[data-bubble-body] .chat-markdown :is(p, ul, ol, li, strong, em, h1, h2, h3, h4, blockquote, th, td) {
   color: inherit;
 }
 [data-mine]:not([data-mine="0"]) [data-bubble-body] .chat-markdown a {
