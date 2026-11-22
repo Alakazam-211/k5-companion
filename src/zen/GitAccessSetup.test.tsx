@@ -57,7 +57,7 @@ beforeEach(() => {
   routes({});
   __resetScopesForTests();
   useServersStore.setState({
-    servers: [{ id: "s1", nickname: "Home", url: "https://home.k2.dev", username: "riley", rememberPassword: false }],
+    servers: [{ id: "s1", nickname: "Home", url: "https://home.k2.example", username: "alice", rememberPassword: false }],
     activeServerId: "s1",
     tokens: { s1: "tok1" },
     recovery: {},

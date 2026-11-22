@@ -2,8 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { compareSewIds, isSewId } from "../api/homeChatPure";
 import type { HomeChatTarget } from "../zen/homeChat/homeChatModel";
 
-// Home chat pushes on the phone (K2 0.46.16 `home-chat-push-v1`; spec
-// /Users/Shared/k2-companion/home-chat-push-spec-0.46.16.md). The pure rules
+// Home chat pushes on the phone (K2 0.46.16 `home-chat-push-v1`; K2's Home
+// chat push rules, 0.46.16). The pure rules
 // the native side keeps too, so they are tested here:
 //
 //   - The notification group: `hc:<server>:<conversationId>`, so the same

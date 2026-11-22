@@ -354,11 +354,11 @@ describe("check", () => {
   it("release notes link and confirm labels", () => {
     expect(releaseNotesUrl("0.46.1")).toBe("https://github.com/Alakazam-211/K2/releases/tag/v0.46.1");
     expect(releaseNotesUrl("v0.46.1")).toBe("https://github.com/Alakazam-211/K2/releases/tag/v0.46.1");
-    expect(confirmCopy("Home", "home.k2.dev", "0.46.1", "bundled-app").confirmLabel).toBe("Update Host");
-    expect(confirmCopy("Home", "home.k2.dev", "0.46.1", "standalone").confirmLabel).toBe("Download & install");
-    const c = confirmCopy("Home", "home.k2.dev", "0.46.1", "standalone");
+    expect(confirmCopy("Home", "home.k2.example", "0.46.1", "bundled-app").confirmLabel).toBe("Update Host");
+    expect(confirmCopy("Home", "home.k2.example", "0.46.1", "standalone").confirmLabel).toBe("Download & install");
+    const c = confirmCopy("Home", "home.k2.example", "0.46.1", "standalone");
     expect(c.title).toBe("Update Home to 0.46.1?");
-    expect(c.message).toContain("on Home (home.k2.dev), the server you're connected to");
+    expect(c.message).toContain("on Home (home.k2.example), the server you're connected to");
   });
 });
 

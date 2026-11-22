@@ -139,7 +139,7 @@ const logs = () => {
 };
 
 beforeEach(() => {
-  setZenScope(fakeScope({ id: "s1", username: "bob", base: "https://s1.k2.dev" }));
+  setZenScope(fakeScope({ id: "s1", username: "bob", base: "https://s1.k2.example" }));
   pool.store.setState({ entries: {} });
 });
 
@@ -227,7 +227,7 @@ describe("a waiting secret card", () => {
     });
     const sent = answers();
     expect(sent).toHaveLength(1);
-    expect(sent[0].url).toBe("https://s1.k2.dev/cli/thread/answer");
+    expect(sent[0].url).toBe("https://s1.k2.example/cli/thread/answer");
     expect(sent[0].init.method).toBe("POST");
     // K2 threadAnswerBody for {secret, inject, disclosed: true}.
     expect(sent[0].body).toEqual({
@@ -395,7 +395,7 @@ describe("a waiting secret card", () => {
   });
 
   it("a Voice & Chat login sees the fallback, not the field", () => {
-    pool.store.setState({ entries: { s1: { ...blankEntry("s1", "s1.k2.dev"), role: "voice_chat" } } });
+    pool.store.setState({ entries: { s1: { ...blankEntry("s1", "s1.k2.example"), role: "voice_chat" } } });
     openRoom([fetchCard()]);
     render(<ThreadPane />);
     expect(screen.queryByTestId("secret-field")).toBeNull();

@@ -132,7 +132,7 @@ describe("the notify frame", () => {
 });
 
 describe("mentions", () => {
-  const me = { memberId: "1", names: ["riley", "Riley Stone"] };
+  const me = { memberId: "1", names: ["alice", "Alice Stone"] };
   const m = (over: Partial<HomeChatMessage>): HomeChatMessage => ({
     id: "5",
     conv: "902",
@@ -160,16 +160,16 @@ describe("mentions", () => {
   });
 
   it("@me in the words, by username or name, whole names only", () => {
-    expect(homeChatMentionsMe(m({ body: "thanks @Riley!" }), me)).toBe(true);
-    expect(homeChatMentionsMe(m({ body: "cc @riley stone" }), me)).toBe(true);
-    expect(homeChatMentionsMe(m({ body: "@rileyx is new" }), me)).toBe(false);
-    expect(homeChatMentionsMe(m({ body: "mail z@riley.dev" }), me)).toBe(false);
-    expect(textMentions("no at sign", ["riley"])).toBe(false);
+    expect(homeChatMentionsMe(m({ body: "thanks @Alice!" }), me)).toBe(true);
+    expect(homeChatMentionsMe(m({ body: "cc @alice stone" }), me)).toBe(true);
+    expect(homeChatMentionsMe(m({ body: "@alicex is new" }), me)).toBe(false);
+    expect(homeChatMentionsMe(m({ body: "mail z@example.com" }), me)).toBe(false);
+    expect(textMentions("no at sign", ["alice"])).toBe(false);
     expect(textMentions("@a.b+c", ["a.b+c"])).toBe(true);
   });
 
   it("never my own message or a deleted one", () => {
-    expect(homeChatMentionsMe(m({ authorId: "1", body: "@riley" }), me)).toBe(false);
-    expect(homeChatMentionsMe(m({ deleted: true, body: "@riley" }), me)).toBe(false);
+    expect(homeChatMentionsMe(m({ authorId: "1", body: "@alice" }), me)).toBe(false);
+    expect(homeChatMentionsMe(m({ deleted: true, body: "@alice" }), me)).toBe(false);
   });
 });

@@ -29,8 +29,8 @@ import type { HomeChatTarget } from "../zen/homeChat/homeChatModel";
 
 beforeEach(() => {
   servers.list = [
-    { id: "s1", url: "https://riley.k2.dev" },
-    { id: "s2", url: "https://team.k2.dev" },
+    { id: "s1", url: "https://fixture-a.k2.dev" },
+    { id: "s2", url: "https://fixture-b.k2.dev" },
   ];
   servers.active = "s1";
 });
@@ -40,24 +40,24 @@ describe("a Home chat tap", () => {
     const nav = vi.fn();
     const open = vi.fn<(t: HomeChatTarget) => void>();
     await routeHomeChatTap(
-      { kind: "home_chat", conversationId: "901", convKind: "dm", senderExt: "k2:owner", senderName: "Riley", k2ServerId: "s2", subdomain: "team" },
+      { kind: "home_chat", conversationId: "901", convKind: "dm", senderExt: "k2:owner", senderName: "Alice", k2ServerId: "s2", subdomain: "fixture-b" },
       nav,
       open
     );
     expect(nav).toHaveBeenCalledWith("/zen");
-    expect(open).toHaveBeenCalledWith({ serverId: "s2", kind: "dm", conversationId: "901", title: "Riley", ext: "k2:owner" });
+    expect(open).toHaveBeenCalledWith({ serverId: "s2", kind: "dm", conversationId: "901", title: "Alice", ext: "k2:owner" });
   });
 
   it("without a saved key, its label names the server", async () => {
     const open = vi.fn<(t: HomeChatTarget) => void>();
-    await routeHomeChatTap({ kind: "home_chat", conversationId: "902", convKind: "channel", channelName: "standup", subdomain: "team" }, vi.fn(), open);
+    await routeHomeChatTap({ kind: "home_chat", conversationId: "902", convKind: "channel", channelName: "standup", subdomain: "fixture-b" }, vi.fn(), open);
     expect(open).toHaveBeenCalledWith({ serverId: "s2", kind: "channel", conversationId: "902", title: "standup", inviteOnly: null });
   });
 
   it("the generic lane opens Home only", async () => {
     const nav = vi.fn();
     const open = vi.fn();
-    await routeHomeChatTap({ kind: "home_chat", subdomain: "riley" }, nav, open);
+    await routeHomeChatTap({ kind: "home_chat", subdomain: "fixture-a" }, nav, open);
     expect(nav).toHaveBeenCalledWith("/zen");
     expect(open).not.toHaveBeenCalled();
   });

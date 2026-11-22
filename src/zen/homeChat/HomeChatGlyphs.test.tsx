@@ -38,7 +38,7 @@ afterEach(() => {
 
 describe("PersonAvatar pictureOf", () => {
   it("draws the fetched picture once it lands", async () => {
-    render(<PersonAvatar username="owner" name="Riley Stone" pictureOf={{ serverId: "s1", ext: "k2:owner", username: "owner", rev: "r1" }} testId="pa" />);
+    render(<PersonAvatar username="owner" name="Alice Stone" pictureOf={{ serverId: "s1", ext: "k2:owner", username: "owner", rev: "r1" }} testId="pa" />);
     expect(screen.getByTestId("pa").getAttribute("data-person-avatar")).toBe("initials");
     await waitFor(() => expect(screen.getByTestId("pa").getAttribute("data-person-avatar")).toBe("picture"));
     expect(screen.getByTestId("pa").querySelector("img")?.getAttribute("src")).toBe(JPG);

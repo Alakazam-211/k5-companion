@@ -6,7 +6,7 @@ import pagePhone from "./goldens/page-phone.json";
 import page from "./goldens/page.json";
 
 // K2's slice A goldens (contract rev 2), copied from
-// /Users/Shared/k2-companion/gardens-phone/.
+// K2's Gardens phone hand-off.
 describe("K2's page goldens", () => {
   it("opens a Garden's mobile version: listed widgets only, with their height and frame version", () => {
     const screens = screensOf(pagePhone.body as unknown as GardenPageBody);

@@ -1,5 +1,5 @@
-// Remote K2 server update: the pure part (daemon contract v0.46.0,
-// `/Users/Shared/k2-companion/remote-update-contract-v0460.md`).
+// Remote K2 server update: the pure part (K2's remote update contract,
+// v0.46.0).
 //
 //   check  → POST /cli/daemon/update/check   {current, latest, available, installKind, …}
 //   start  → POST /cli/daemon/update/start   {} → {job_id}

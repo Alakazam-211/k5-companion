@@ -74,7 +74,7 @@ beforeEach(() => {
   offSignals = onServerSignal((id, s) => void signals.push([id, s]));
   useServersStore.setState({
     hydrated: true,
-    servers: [{ id: "host", nickname: "Host", url: "https://host.k2.dev", username: "u", rememberPassword: false } as ServerEntry],
+    servers: [{ id: "host", nickname: "Host", url: "https://host.k2.example", username: "u", rememberPassword: false } as ServerEntry],
     tokens: { host: "tok" },
     recovery: { host: "connected" },
   });
@@ -90,7 +90,7 @@ describe("access_changed", () => {
   it("one frame on each socket (two copies) is ONE whoami re-read", async () => {
     const rereads = fakeRereads();
     const off = wireAccessLive(rereads);
-    const h = subscribeAppEvents(fakeScope({ id: "host", base: "https://host.k2.dev" }), () => false, vi.fn());
+    const h = subscribeAppEvents(fakeScope({ id: "host", base: "https://host.k2.example" }), () => false, vi.fn());
     const ws = MockWS.instances[0];
     ws.onopen?.();
     ws.deliver({ kind: "access_changed" });
@@ -112,7 +112,7 @@ describe("access_changed", () => {
   it("the frame still reaches its own subscribers (the call's recording re-read)", () => {
     const onChange = vi.fn();
     const h = subscribeAppEvents(
-      fakeScope({ id: "host", base: "https://host.k2.dev" }),
+      fakeScope({ id: "host", base: "https://host.k2.example" }),
       (f) => (f as { kind?: string }).kind === "access_changed",
       onChange
     );
@@ -138,7 +138,7 @@ describe("access_changed", () => {
 });
 
 describe("close 4003", () => {
-  const scope = () => fakeScope({ id: "host", base: "https://host.k2.dev" });
+  const scope = () => fakeScope({ id: "host", base: "https://host.k2.example" });
 
   it("a dead login: no reconnect, the server says Sign in again", async () => {
     reviveMock.mockResolvedValue("signin-required");

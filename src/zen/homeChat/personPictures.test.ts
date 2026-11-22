@@ -89,7 +89,7 @@ async function want(ref: Parameters<typeof wantPersonPicture>[0]) {
 describe("the login asked for", () => {
   it("is owner for k2:owner, else the username", () => {
     expect(pictureLogin("k2:owner", "")).toBe("owner");
-    expect(pictureLogin("K2:Owner", "riley")).toBe("owner");
+    expect(pictureLogin("K2:Owner", "alice")).toBe("owner");
     expect(pictureLogin("k2:connect:abc", " sam ")).toBe("sam");
     expect(pictureLogin("k2:connect:abc", "")).toBe("");
   });

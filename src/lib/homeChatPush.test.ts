@@ -16,7 +16,7 @@ import {
 } from "./homeChatPush";
 
 describe("the notification group", () => {
-  const base = { kind: "home_chat", conversationId: "901", badgeKey: "bk-1", k2ServerId: "srv-a", subdomain: "Riley", instanceId: "a1b2" };
+  const base = { kind: "home_chat", conversationId: "901", badgeKey: "bk-1", k2ServerId: "srv-a", subdomain: "Alice", instanceId: "a1b2" };
 
   it("is hc:<server>:<conversation>, by the stable badgeKey first", () => {
     expect(homeChatThreadId(base)).toBe("hc:bk-1:901");
@@ -24,7 +24,7 @@ describe("the notification group", () => {
 
   it("falls back to the saved server, the label, then the instance id", () => {
     expect(homeChatServerKey({ ...base, badgeKey: "" })).toBe("srv-a");
-    expect(homeChatServerKey({ ...base, badgeKey: "", k2ServerId: "" })).toBe("riley");
+    expect(homeChatServerKey({ ...base, badgeKey: "", k2ServerId: "" })).toBe("alice");
     expect(homeChatServerKey({ instanceId: "a1b2" })).toBe("a1b2");
     expect(homeChatServerKey({})).toBeNull();
   });
