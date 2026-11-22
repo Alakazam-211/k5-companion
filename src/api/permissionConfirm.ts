@@ -18,7 +18,15 @@ import { scopedFetch } from "./scopedFetch";
 export const CONFIRM_METHOD_LOGIN = "connect-password";
 export const CONFIRM_METHOD_VAULT = "vault-password";
 
-export type ConfirmErrorCode = "forbidden" | "wrong_password" | "locked" | "expired" | "unavailable" | "network";
+export type ConfirmErrorCode =
+  | "forbidden"
+  | "owner_only"
+  | "wrong_password"
+  | "locked"
+  | "expired"
+  | "not_waiting"
+  | "unavailable"
+  | "network";
 
 export type ConfirmResult<T> = { ok: true; data: T } | { ok: false; code: ConfirmErrorCode; text: string };
 
@@ -49,6 +57,10 @@ export function confirmErrorText(code: ConfirmErrorCode): string {
       return "That took too long. Try again.";
     case "forbidden":
       return "Only an owner or admin can approve this.";
+    case "owner_only":
+      return "Only the server's owner can approve this.";
+    case "not_waiting":
+      return "This request isn't waiting any more: it was answered elsewhere, expired or withdrawn.";
     case "unavailable":
       return "This server can't confirm from the phone. Approve on your desktop.";
     default:
@@ -63,7 +75,13 @@ async function post(scope: ServerScope, path: string, body: Record<string, unkno
 function mapFailure(status: number, text: string): { ok: false; code: ConfirmErrorCode; text: string } {
   const c = errorCode(text);
   let code: ConfirmErrorCode = "network";
-  if (status === 429) code = "locked";
+  // The daemon's own codes first (K2 0.46.17 vault-owner-confirm: a wrong
+  // password is 403 confirm_failed, not a role refusal), then the status.
+  if (c === "confirm_failed") code = "wrong_password";
+  else if (c === "confirm_locked" || c === "rate_limited") code = "locked";
+  else if (c === "owner_only") code = "owner_only";
+  else if (c === "bad_secret_id") code = "not_waiting";
+  else if (status === 429) code = "locked";
   else if (status === 401 || /password|mismatch|invalid_credentials/i.test(c)) code = "wrong_password";
   else if (status === 403) code = "forbidden";
   else if (status === 410 || /expired/i.test(c)) code = "expired";
@@ -76,13 +94,16 @@ export async function confirmStart(
   scope: ServerScope,
   action: string,
   secretId: string
-): Promise<ConfirmResult<{ methods: string[]; expiresIn: number }>> {
+): Promise<ConfirmResult<{ methods: string[]; expiresIn: number; confirmText: string | null }>> {
   try {
     const r = await post(scope, "/cli/vault/confirm/start", { action, secretId });
     if (!r.ok) return mapFailure(r.status, r.text);
     const j = JSON.parse(r.text || "{}") as Record<string, unknown>;
     const methods = Array.isArray(j.methods) ? j.methods.filter((m): m is string => typeof m === "string") : [];
-    return { ok: true, data: { methods, expiresIn: typeof j.expiresIn === "number" ? j.expiresIn : 60 } };
+    // The server's exact wording of the step (K2 0.46.17); the sheet shows
+    // it in place of the card's headline when present.
+    const confirmText = str(j.confirmText).trim() || null;
+    return { ok: true, data: { methods, expiresIn: typeof j.expiresIn === "number" ? j.expiresIn : 60, confirmText } };
   } catch {
     return { ok: false, code: "network", text: confirmErrorText("network") };
   }

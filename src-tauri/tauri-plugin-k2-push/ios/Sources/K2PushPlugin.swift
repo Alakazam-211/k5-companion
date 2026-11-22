@@ -76,6 +76,34 @@ class K2PushPlugin: Plugin {
   // The delegate-hook C blocks need a way back into the instance; the
   // PluginManager keeps the plugin alive for the app's lifetime.
   static var shared: K2PushPlugin?
+  /// The Home chat on screen (saved server id, Sew conversation), set by
+  /// `notificationOp homeChatViewing`. Under `homeChatLock` (the
+  /// notification delegate may run off the main thread).
+  private static var homeChatOpen: (server: String, conv: String)?
+  private static let homeChatLock = NSLock()
+
+  static var homeChatOnScreen: (server: String, conv: String)? {
+    get {
+      homeChatLock.lock()
+      defer { homeChatLock.unlock() }
+      return homeChatOpen
+    }
+    set {
+      homeChatLock.lock()
+      homeChatOpen = newValue
+      homeChatLock.unlock()
+    }
+  }
+
+  /// A Home chat push for the chat on screen (K2 0.46.16): no banner. Its
+  /// server is the saved server whose key opened it (`k2ServerId`, sealed
+  /// pushes only; Home chat text is never on the clear lane).
+  static func isHomeChatOnScreen(_ info: [AnyHashable: Any]) -> Bool {
+    guard let open = homeChatOnScreen, (info["kind"] as? String) == "home_chat",
+      let server = info["k2ServerId"] as? String, let conv = info["conversationId"] as? String
+    else { return false }
+    return server == open.server && conv.trimmingCharacters(in: .whitespacesAndNewlines) == open.conv
+  }
 
   private var apnsToken: String?
   private var waiters: [(TokenResult) -> Void] = []
@@ -102,6 +130,7 @@ class K2PushPlugin: Plugin {
   @objc public override func load(webview: WKWebView) {
     tapDelegate.plugin = self
     if #available(iOS 15.0, *) { K2PiP.shared.webView = webview }
+    K2SelfView.shared.webView = webview
     // The call shim's events: to Rust (`voiceWatch`'s channel), which acts
     // on them through the voice engine, and to the UI as `call`.
     if #available(iOS 14.0, *) {
@@ -176,6 +205,8 @@ class K2PushPlugin: Plugin {
   ///     "authorized" | "provisional" | "ephemeral" ("unknown" otherwise).
   ///   `{op: "openSettings"}` → `{ok}`: this app's notification settings
   ///     in iOS Settings (iOS 16+; the app's own Settings page before).
+  ///   `{op: "homeChatViewing", server, conv}` → `{ok}`: the Home chat on
+  ///     screen (empty: none), for the foreground banner (K2 0.46.16).
   @objc public func notificationOp(_ invoke: Invoke) {
     let args: NotificationOpArgs
     do {
@@ -191,6 +222,17 @@ class K2PushPlugin: Plugin {
         let names = [0: "notDetermined", 1: "denied", 2: "authorized", 3: "provisional", 4: "ephemeral"]
         invoke.resolve(["state": names[settings.authorizationStatus.rawValue] ?? "unknown"])
       }
+    case "homeChatViewing":
+      // K2 0.46.16: the Home chat on screen (both empty: none). A Home chat
+      // push for it shows no banner while the app is in front (willPresent).
+      let server = (args.server ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      let conv = (args.conv ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+      if server.isEmpty || conv.isEmpty {
+        K2PushPlugin.homeChatOnScreen = nil
+      } else {
+        K2PushPlugin.homeChatOnScreen = (server: server, conv: conv)
+      }
+      invoke.resolve(["ok": true])
     case "openSettings":
       DispatchQueue.main.async {
         var raw = UIApplication.openSettingsURLString
@@ -384,7 +426,14 @@ class K2PushPlugin: Plugin {
       return
     }
     let chats = args.chats.compactMap { c -> K2DeliveredClear.Chat? in
-      guard c.kind == "thread" || c.kind == "project", !c.id.isEmpty else { return nil }
+      guard !c.id.isEmpty else { return nil }
+      if c.kind == "home" {
+        // A Sew id as a decimal string (JS numbers lose digits past 2^53);
+        // none = everything delivered before `before`.
+        let upTo = c.upTo.flatMap { Int($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        return K2DeliveredClear.Chat(kind: "home", id: c.id, seq: upTo)
+      }
+      guard c.kind == "thread" || c.kind == "project" else { return nil }
       return K2DeliveredClear.Chat(kind: c.kind, id: c.id, seq: c.seq)
     }
     let op: K2DeliveredClear.Op = args.mode == "keepOnly" ? .keepOnly(chats) : .read(chats)
@@ -463,7 +512,10 @@ class K2PushPlugin: Plugin {
       }
     case "report":
       shim.report(state: args.state ?? "", reason: args.reason, video: args.video)
-      if args.state == "ended" { k2PiPCallEnded() }
+      if args.state == "ended" {
+        k2PiPCallEnded()
+        k2SelfViewCallEnded()
+      }
       invoke.resolve(["ok": true])
     case "mute":
       shim.setMuted(args.on ?? false)
@@ -474,6 +526,7 @@ class K2PushPlugin: Plugin {
     case "end":
       shim.end()
       k2PiPCallEnded()
+      k2SelfViewCallEnded()
       invoke.resolve(["ok": true])
     case "speaker":
       invoke.resolve(["ok": shim.setSpeaker(args.on ?? false), "route": K2CallShim.currentRoute()])
@@ -524,6 +577,15 @@ class K2PushPlugin: Plugin {
         invoke.resolve(
           K2PiP.shared.setTile(
             rect, radius: CGFloat(args.radius ?? 0), corners: K2PiP.cornerMask(args.corners), motion: motion))
+      }
+    case "selfViewFrame":
+      // The native self-view (K2SelfView): your camera's tile at `{x, y, w,
+      // h, radius}` in the webview's points; `visible: false` hides it.
+      let rect: CGRect? =
+        args.visible == true
+        ? CGRect(x: args.x ?? 0, y: args.y ?? 0, width: args.w ?? 0, height: args.h ?? 0) : nil
+      DispatchQueue.main.async {
+        invoke.resolve(K2SelfView.shared.setTile(rect, radius: CGFloat(args.radius ?? 0)))
       }
     case "haptic":
       // The mini video tile landing in its corner: a light tap. `state:
@@ -860,9 +922,11 @@ class K2PushPlugin: Plugin {
       let server = K2DeliveredClear.Server(
         badgeKey: push["badgeKey"] as? String, subdomain: push["subdomain"] as? String,
         instanceId: push["instanceId"] as? String)
+      // K2 0.46.16: `h:` hints clear those Home chats; `homeUnread` 0 clears
+      // every Home chat notification from the server.
       let ops = K2DeliveredClear.silentOps(
         unread: applied.totals.unread, waiting: applied.totals.waiting,
-        hints: K2DeliveredClear.parseReadHints(push["read"]))
+        hints: K2DeliveredClear.parseReadHints(push["read"]), homeUnread: applied.totals.home)
       // Complete only once the badge is set and the clearing done: iOS may
       // suspend us right after.
       K2PushPlugin.setIconBadge(applied.sum) {
@@ -1218,6 +1282,11 @@ private class K2PushTapDelegate: NSObject, UNUserNotificationCenterDelegate {
       return
     }
     plugin?.handlePresentedTotals(notification.request.content.userInfo)
+    // A Home chat push for the chat on screen: the chat shows it already.
+    if K2PushPlugin.isHomeChatOnScreen(notification.request.content.userInfo) {
+      completionHandler([])
+      return
+    }
     if #available(iOS 14.0, *) {
       completionHandler([.banner, .sound, .badge])
     } else {
@@ -1281,7 +1350,7 @@ private struct CallOpArgs: Decodable {
   let video: Bool?
   // `copyText`
   let text: String?
-  // `pipFrame`
+  // `pipFrame`, `selfViewFrame`
   let x: Double?
   let y: Double?
   let w: Double?
@@ -1332,6 +1401,9 @@ private struct ApproverKeysArgs: Decodable {
 
 private struct NotificationOpArgs: Decodable {
   let op: String
+  /// `homeChatViewing`: the saved server id and the conversation on screen.
+  let server: String?
+  let conv: String?
 }
 
 private struct TokenOpArgs: Decodable {
@@ -1376,6 +1448,8 @@ private struct ClearDeliveredChat: Decodable {
   let kind: String
   let id: String
   let seq: Int?
+  /// Home chat: the newest message read, a Sew id as a string.
+  let upTo: String?
 }
 
 // ── Notification avatar cache (App Group) ─────────────────────────────

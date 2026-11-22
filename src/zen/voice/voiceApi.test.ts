@@ -4,7 +4,7 @@ const scopedFetch = vi.hoisted(() => vi.fn());
 vi.mock("../../api/scopedFetch", () => ({ scopedFetch: (...a: unknown[]) => scopedFetch(...a) }));
 
 import type { ServerScope } from "../../api/scope";
-import { isK2CallId, leaveVoiceSession, SESSION_LEAVE_TIMEOUT_MS } from "./voiceApi";
+import { fetchRecordingControls, isAccessChanged, isK2CallId, leaveVoiceSession, SESSION_LEAVE_TIMEOUT_MS } from "./voiceApi";
 
 const scope = { id: "s1" } as unknown as ServerScope;
 
@@ -35,5 +35,46 @@ describe("leaveVoiceSession", () => {
     expect(await leaveVoiceSession(scope, "vc_1")).toBe(false);
     scopedFetch.mockRejectedValueOnce(new Error("offline"));
     expect(await leaveVoiceSession(scope, "vc_1")).toBe(false);
+  });
+});
+
+// K2 0.46.11: the person's rights in the room, for Record and Stop.
+describe("fetchRecordingControls", () => {
+  it("posts {room} to recording/controls and reads the rights", async () => {
+    scopedFetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: JSON.stringify({
+        ok: true,
+        room: "standup",
+        myPerms: "8192",
+        recordCalls: true,
+        manageChannels: false,
+        rights: { dm: false, recordingEnabled: true, recordingDmEnabled: false, recordCapped: false, agent: false },
+      }),
+    });
+    const r = await fetchRecordingControls(scope, "standup");
+    expect(scopedFetch).toHaveBeenCalledWith(scope, "/cli/voice/recording/controls", {
+      method: "POST",
+      body: JSON.stringify({ room: "standup" }),
+      headers: { "Content-Type": "application/json" },
+      priority: "user",
+    });
+    expect(r).toMatchObject({ ok: true, answer: { rights: { room: "standup", my_perms: "8192", recording_enabled: true }, recordCalls: true } });
+  });
+
+  it("a K2 before 0.46.11 (404) is unsupported; anything else failed", async () => {
+    scopedFetch.mockResolvedValueOnce({ ok: false, status: 404, text: "" });
+    expect(await fetchRecordingControls(scope, "standup")).toEqual({ ok: false, code: "unsupported", status: 404 });
+    scopedFetch.mockResolvedValueOnce({ ok: false, status: 500, text: "" });
+    expect(await fetchRecordingControls(scope, "standup")).toEqual({ ok: false, code: "failed", status: 500 });
+    scopedFetch.mockRejectedValueOnce(new Error("offline"));
+    expect(await fetchRecordingControls(scope, "standup")).toEqual({ ok: false, code: "failed", status: 0 });
+  });
+
+  it("knows K2's access_changed frame", () => {
+    expect(isAccessChanged({ kind: "access_changed" })).toBe(true);
+    expect(isAccessChanged({ kind: "voice_rooms_changed" })).toBe(false);
+    expect(isAccessChanged(null)).toBe(false);
   });
 });

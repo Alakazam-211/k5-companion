@@ -299,7 +299,7 @@ describe("Zen Sessions drawer", () => {
     expect(within(drawer).queryByTestId("sessions-empty")).toBeNull();
   });
 
-  it("reads Active, + New session, History top to bottom", async () => {
+  it("reads Active, History top to bottom, with + New session pinned in the footer last", async () => {
     vi.mocked(getActivePresets).mockResolvedValue({ ok: true, data: PRESETS } as never);
     await openMain();
     const drawer = await openDrawer();
@@ -313,10 +313,13 @@ describe("Zen Sessions drawer", () => {
     const first = (id: string) => order.indexOf(id);
     expect(first("sessions-active")).toBe(0);
     expect(first("session-row-main")).toBeGreaterThan(first("sessions-active"));
-    expect(first("session-row-terminal")).toBeLessThan(first("sessions-new"));
-    expect(first("sessions-new")).toBeLessThan(first("sessions-history"));
+    expect(first("session-row-terminal")).toBeLessThan(first("sessions-history"));
+    expect(order.lastIndexOf("session-row-terminal")).toBeLessThan(first("sessions-history"));
     expect(first("sessions-history")).toBeLessThan(first("session-row-history"));
-    expect(order.lastIndexOf("session-row-terminal")).toBeLessThan(first("sessions-new"));
+    // New session is the drawer's footer (K2 Design 2026-11-20): after the
+    // whole list, History included.
+    expect(order.lastIndexOf("session-row-history")).toBeLessThan(first("sessions-new"));
+    expect(first("sessions-new")).toBe(order.length - 1);
     expect(within(drawer).getByTestId("sessions-history").textContent).toBe("History");
   });
 
@@ -445,7 +448,8 @@ describe("Zen Sessions drawer", () => {
     await waitFor(() => expect(useZenStore.getState().threadAddr).toBe(PLANNING));
     expect(vi.mocked(getAllSessions).mock.calls.length).toBeGreaterThan(calls);
     expect(useZenStore.getState().drawerOrigin).toBe(MAIN.id);
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
     expect(screen.getByTestId("chat-done").getAttribute("aria-label")).toBe("Back");
     expect(screen.queryByTestId("term-loc")).toBeNull();
     const added = useZenStore.getState().agents.find((a) => a.addr === PLANNING);
@@ -603,7 +607,8 @@ describe("Zen Sessions drawer", () => {
     expect(useZenStore.getState().threadAddr).toBe("k2/reviewer");
     expect(useZenStore.getState().drawerOrigin).toBe(MAIN.id);
     expect(sessionStorage.getItem(DRAWER_ORIGIN_KEY)).toBe(MAIN.id);
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
     expect(screen.getByTestId("chat-done").getAttribute("aria-label")).toBe("Back");
     expect(screen.queryByTestId("chat-back")).toBeNull();
     // Done mode: the centre title is <Agent>/<sidecar>, pencil beside it.
@@ -653,7 +658,8 @@ describe("Zen Sessions drawer", () => {
     await waitFor(() =>
       expect(screen.getByTestId("term-loc").textContent).toBe("/zen/terminal/t-main")
     );
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
   });
 
   it("when K2 won't start the agent, Terminal opens Sessions with the reason", async () => {
@@ -753,7 +759,8 @@ describe("Zen Sessions drawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(useZenStore.getState().filesOpen).toBe(true);
     expect(screen.getByTestId("file-pane")).not.toBeNull();
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(useZenStore.getState().filesOpen).toBe(false);
   });
@@ -763,7 +770,8 @@ describe("Zen Sessions drawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Sessions" }));
     expect(await screen.findByTestId("sessions-drawer")).not.toBeNull();
     fireEvent.click(screen.getByTestId("thread-column"));
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
   });
 
   it("each row leads with its LLM's icon; a plain shell keeps >_", async () => {
@@ -818,7 +826,9 @@ describe("Zen Sessions drawer", () => {
     const toggle = await within(drawer).findByTestId("sessions-new-toggle");
     expect(toggle.textContent).toContain("New session");
     expect(within(toggle).getByTestId("plus-glyph")).not.toBeNull();
-    expect(toggle.className).toMatch(/zen-glass/);
+    // A solid drawer button (K2 Design 2026-11-20), not frost.
+    expect(toggle.className).toMatch(/k2-drawer-button/);
+    expect(toggle.className).not.toMatch(/zen-glass/);
     fireEvent.click(toggle);
     const items = within(drawer).getAllByTestId("sessions-llm");
     expect(items.map((b) => b.getAttribute("data-llm-id"))).toEqual(["p-claude", "p-codex", "p-aider"]);
@@ -830,6 +840,59 @@ describe("Zen Sessions drawer", () => {
     // Aider is not a sidecar harness: the daemon runs it as a plain tab.
     expect(items[2].textContent).toContain("Opens as a terminal");
     expect(items[0].textContent).not.toContain("Opens as a terminal");
+  });
+
+  it("New session is a footer pinned under the list, its menu opening upward", async () => {
+    vi.mocked(getActivePresets).mockResolvedValue({ ok: true, data: PRESETS } as never);
+    await openMain();
+    const drawer = await openDrawer();
+    const footer = await within(drawer).findByTestId("sessions-new");
+    const list = within(drawer).getByTestId("sessions-list");
+    // Outside the scrolling list, after it: it never scrolls away.
+    expect(list.contains(footer)).toBe(false);
+    expect(list.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(footer.className).toMatch(/k2-drawer-foot/);
+    fireEvent.click(within(footer).getByTestId("sessions-new-toggle"));
+    const menu = within(footer).getByTestId("sessions-llm-list");
+    expect(menu.style.bottom).toBe("calc(100% + 8px)");
+    expect(menu.className).toMatch(/k2-tile-raised/);
+  });
+
+  it("the current row is tinted (data-current) and keeps its check; others are not", async () => {
+    await openMain();
+    const drawer = await openDrawer();
+    await within(drawer).findByText("k2/reviewer");
+    const main = within(drawer).getByTestId("session-row-main");
+    expect(main.getAttribute("data-current")).toBe("1");
+    expect(main.getAttribute("aria-current")).toBe("true");
+    expect(main.className).toMatch(/k2-drawer-row/);
+    expect(within(main).getByTestId("session-current")).not.toBeNull();
+    for (const row of within(drawer).getAllByTestId("session-row-sidecar")) {
+      expect(row.getAttribute("data-current")).toBeNull();
+      expect(within(row).queryByTestId("session-current")).toBeNull();
+    }
+    // No hairlines between rows.
+    expect(main.className).not.toMatch(/border-b/);
+  });
+
+  it("is a modal dialog over a scrim; a tap on the scrim closes it", async () => {
+    await openMain();
+    const drawer = await openDrawer();
+    const dialog = screen.getByRole("dialog", { name: "Sessions" });
+    expect(dialog.getAttribute("aria-modal")).toBe("true");
+    expect(dialog.contains(drawer)).toBe(true);
+    expect(dialog.className).toMatch(/k2-tile/);
+    // The Thread under it is hidden from assistive tech while it is up.
+    const thread = screen.getByTestId("thread-scroller").parentElement!;
+    expect(thread.getAttribute("aria-hidden")).toBe("true");
+    const scrim = screen.getByTestId("sessions-pane-scrim");
+    fireEvent.click(scrim);
+    // Closing: still mounted for its slide, no longer modal content.
+    expect(dialog.getAttribute("data-state")).toBe("closing");
+    expect(dialog.getAttribute("aria-hidden")).toBe("true");
+    expect(thread.getAttribute("aria-hidden")).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
+    expect(screen.queryByTestId("sessions-pane-scrim")).toBeNull();
   });
 
   it("picking an LLM spawns the next sidecar with that harness and lands in it in Done mode", async () => {
@@ -861,7 +924,8 @@ describe("Zen Sessions drawer", () => {
     await waitFor(() => expect(useZenStore.getState().threadAddr).toBe("k2/2"));
     expect(useZenStore.getState().drawerOrigin).toBe(MAIN.id);
     expect(sessionStorage.getItem(DRAWER_ORIGIN_KEY)).toBe(MAIN.id);
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
     expect(screen.getByTestId("chat-done").getAttribute("aria-label")).toBe("Back");
     expect(screen.getByTestId("chat-header-title").textContent).toBe("K2/2");
     fireEvent.click(screen.getByTestId("chat-done"));
@@ -917,7 +981,8 @@ describe("Zen — Android Back", () => {
     await openMain();
     await openDrawer();
     expect(back()).toBe(true);
-    expect(screen.queryByTestId("sessions-drawer")).toBeNull();
+    // The drawer slides away, then unmounts.
+    await waitFor(() => expect(screen.queryByTestId("sessions-drawer")).toBeNull());
     expect(useZenStore.getState().screen).toBe("thread");
 
     expect(back()).toBe(true);

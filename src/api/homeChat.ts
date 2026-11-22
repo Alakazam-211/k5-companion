@@ -33,8 +33,10 @@ import {
   parseHomeChatDelta,
   parseHomeChatMembers,
   parseHomeChatMessage,
+  parseHomeChatNotify,
   parseHomeChatPage,
   parseHomeChatPeople,
+  parseHomeChatPushPrefs,
   parseHomeChatReactors,
   parseHomeChatRefusal,
   parseHomeChatStatus,
@@ -48,8 +50,11 @@ import {
   type HomeChatFlags,
   type HomeChatMembers,
   type HomeChatMessage,
+  type HomeChatNotify,
+  type HomeChatNotifyChoice,
   type HomeChatPage,
   type HomeChatPeople,
+  type HomeChatPushPrefs,
   type HomeChatRefusal,
   type HomeChatResult,
   type HomeChatStatus,
@@ -440,6 +445,58 @@ export async function setHomeChatAllowAgents(
   if (!isSewId(conv)) return badId("conv");
   const r = await call(scope, "/cli/home-chat/channels/allow-agents", { method: "POST", body: { conv, on }, priority: "user" });
   return r.ok ? ok({ allowAgents: obj(r.body)?.allowAgents === true }) : r;
+}
+
+// ─── Pushes (K2 0.46.16, `home-chat-push-v1`) ───
+
+/** `GET /cli/home-chat/notify?conv=`: this person's push level for one
+ *  conversation (a DM answers `fixed: true`: DMs always notify). */
+export async function fetchHomeChatNotify(scope: ServerScope, conv: string): Promise<HomeChatResult<{ notify: HomeChatNotify }>> {
+  if (!isSewId(conv)) return badId("conv");
+  const r = await call(scope, "/cli/home-chat/notify", { query: { conv }, priority: "user" });
+  if (!r.ok) return r;
+  const notify = parseHomeChatNotify(r.body);
+  return notify ? ok({ notify }) : clientRefusal("bad_response", "the server answered no notify level for that conversation");
+}
+
+/** `POST /cli/home-chat/notify/set {conv, level}`: All messages or
+ *  @mentions only. A DM answers 409 `dm_always_notifies` (kind `conflict`). */
+export async function setHomeChatNotify(
+  scope: ServerScope,
+  conv: string,
+  level: HomeChatNotifyChoice
+): Promise<HomeChatResult<{ notify: HomeChatNotify }>> {
+  if (!isSewId(conv)) return badId("conv");
+  if (level !== "all" && level !== "mentions") return clientRefusal("usage", "level is all or mentions");
+  const r = await call(scope, "/cli/home-chat/notify/set", { method: "POST", body: { conv, level }, priority: "user" });
+  if (!r.ok) return r;
+  const notify = parseHomeChatNotify(r.body);
+  return notify ? ok({ notify }) : clientRefusal("bad_response", "the server answered no notify level for that conversation");
+}
+
+/** `GET /cli/home-chat/push-prefs`: Show message text, agents' posts, and
+ *  whether pushes reach you at all. */
+export async function fetchHomeChatPushPrefs(scope: ServerScope): Promise<HomeChatResult<{ prefs: HomeChatPushPrefs }>> {
+  const r = await call(scope, "/cli/home-chat/push-prefs");
+  if (!r.ok) return r;
+  const prefs = parseHomeChatPushPrefs(r.body);
+  return prefs ? ok({ prefs }) : clientRefusal("bad_response", "the push prefs answer has no previews");
+}
+
+/** `POST /cli/home-chat/push-prefs/set {previews?, agents?}`: only what
+ *  `patch` names (the body is `deny_unknown_fields`). */
+export async function setHomeChatPushPrefs(
+  scope: ServerScope,
+  patch: { previews?: boolean; agents?: boolean }
+): Promise<HomeChatResult<{ prefs: HomeChatPushPrefs }>> {
+  const body: Record<string, unknown> = {};
+  if (typeof patch.previews === "boolean") body.previews = patch.previews;
+  if (typeof patch.agents === "boolean") body.agents = patch.agents;
+  if (Object.keys(body).length === 0) return clientRefusal("usage", "set previews or agents");
+  const r = await call(scope, "/cli/home-chat/push-prefs/set", { method: "POST", body, priority: "user" });
+  if (!r.ok) return r;
+  const prefs = parseHomeChatPushPrefs(r.body);
+  return prefs ? ok({ prefs }) : clientRefusal("bad_response", "the push prefs answer has no previews");
 }
 
 // ─── DM calls (§3) ───

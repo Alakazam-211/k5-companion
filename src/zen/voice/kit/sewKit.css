@@ -233,3 +233,33 @@
 .k2-kit-call-time:empty {
   display: none;
 }
+
+/* Record and Stop under the call bar (KitCall RecordingRow, K2 0.46.11). */
+.k2-kit-call .k2-kit-recording {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px 2px;
+}
+.k2-kit-call .k2-kit-recording .sv-rec-badge,
+.k2-kit-call .k2-kit-recording .sv-rec-controls {
+  flex-basis: auto;
+}
+.k2-kit-call .k2-kit-recording-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-soft);
+  margin-left: 6px;
+}
+.k2-kit-call .k2-kit-recording-note,
+.k2-kit-call .k2-kit-recording-error {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 13px;
+}
+.k2-kit-call .k2-kit-recording-note {
+  color: var(--muted);
+}
+.k2-kit-call .k2-kit-recording-error {
+  color: #ff9f0a; /* the overlay's warning orange */
+}

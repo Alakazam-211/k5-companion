@@ -20,6 +20,13 @@ export function formatCallDuration(ms: number): string {
  *  call first connects. */
 export function useCallDuration(): string | null {
   const startedAt = useVoiceCall((s) => s.startedAt);
+  return useElapsedSince(startedAt);
+}
+
+/** The time since `startedAt` (unix ms), `m:ss` / `h:mm:ss`, ticking as
+ *  `useCallDuration` does; `null` while it is `null`. Also the recording's
+ *  running time (Sew's `started_at`). */
+export function useElapsedSince(startedAt: number | null): string | null {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (startedAt === null) return;

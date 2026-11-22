@@ -124,10 +124,12 @@ function liftedPieces(
   return { menu: agentMenuPlacement(grown, count, align, visibleBottom), head: { top: headTop } };
 }
 
-/** A copy of `el` for the lift: no ids or hooks, no margins, its own
- *  width (a row's percent max width has no list to measure up there). */
+/** A copy of `el` for the lift: no ids or hooks, nothing marked
+ *  `data-lift-skip`, no margins, its own width (a row's percent max width has no list to measure up there). */
 export function liftCopy(el: HTMLElement, width: number): HTMLElement {
   const copy = el.cloneNode(true) as HTMLElement;
+  // What stays on the page (a sender's picture beside the bubble).
+  for (const n of Array.from(copy.querySelectorAll("[data-lift-skip]"))) n.remove();
   for (const n of [copy, ...Array.from(copy.querySelectorAll<HTMLElement>("*"))]) {
     for (const a of CLONE_STRIP) n.removeAttribute(a);
   }

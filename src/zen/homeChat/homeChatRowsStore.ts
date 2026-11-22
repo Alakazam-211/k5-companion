@@ -39,6 +39,7 @@ import { onHomeChatGone, onHomeChatMoved, type HomeChatGone } from "./homeChatSt
 import { chatRowParts } from "./homeChatRows";
 import { useHomesStore } from "../homes";
 import { entryMatchesHomeHost } from "../homeServerIds";
+import { notePeoplePictures } from "./personPictures";
 
 export interface HomeChatServerState {
   /** Null until read. */
@@ -150,8 +151,10 @@ export function refreshChatPeople(serverId: string, force = false): Promise<void
     if (!st.gate?.offered) return;
     if (!force && st.peopleAt !== null && Date.now() - st.peopleAt < HOME_CHAT_LIST_FRESH_MS) return;
     const r = await fetchHomeChatPeople(scopeFor(serverId));
-    if (r.ok) patch(serverId, { people: { me: r.me, people: r.people }, peopleAt: Date.now(), peopleError: null });
-    else patch(serverId, { peopleError: r.hint || r.code });
+    if (r.ok) {
+      patch(serverId, { people: { me: r.me, people: r.people }, peopleAt: Date.now(), peopleError: null });
+      void notePeoplePictures(serverId, { me: r.me, people: r.people }, scopeFor(serverId).username?.() ?? "");
+    } else patch(serverId, { peopleError: r.hint || r.code });
   });
 }
 

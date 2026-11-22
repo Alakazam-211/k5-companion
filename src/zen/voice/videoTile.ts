@@ -93,7 +93,7 @@ export function sameFrame(a: TileFrame | null, b: TileFrame): boolean {
   return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h && a.radius === b.radius && a.corners === b.corners;
 }
 
-function currentViewport(): Viewport {
+export function currentViewport(): Viewport {
   const vv = typeof window !== "undefined" ? window.visualViewport : null;
   if (vv)
     return {

@@ -231,7 +231,7 @@ export function GardenView({
               key={screen.index}
               type="button"
               className="shrink-0 text-[13px] zen-glass zen-glass-pill"
-              style={{ padding: "6px 12px", color: "#fff", opacity: i === current ? 1 : 0.55 }}
+              style={{ padding: "6px 12px", color: "var(--color-text-primary)", opacity: i === current ? 1 : 0.55 }}
               aria-current={i === current || undefined}
               data-testid="garden-tab"
               onClick={() => goTo(i)}

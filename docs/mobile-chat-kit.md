@@ -3,7 +3,7 @@
 What we did to make K2 Companion's chat screens (Tauri 2 iOS, React, one
 WKWebView) feel like iMessage around the keyboard, why each piece works,
 and what did not. Written for another Tauri / WKWebView team; the code is
-in `src/kit/mobileChat/` (hooks), `src/lib/useViewportHeight.ts`
+in `src/kit/mobileChat/` (hooks and the send motion), `src/lib/useViewportHeight.ts`
 (viewport store), `src-tauri/src/lib.rs` (`mod ios_keyboard`, the native
 shim) and the `.mchat-*` block in `src/styles/index.css`.
 
@@ -279,7 +279,7 @@ import {
 } from "src/kit/mobileChat";
 ```
 
-A chat screen (see `ThreadPane.tsx`, `TicketView.tsx` for full wiring):
+A chat screen (see `ThreadPane.tsx`, `TicketView.tsx`, `homeChat/HomeChatView.tsx` for full wiring):
 
 ```tsx
 const vp = useViewport();                       // {height, offsetTop, motion, interactive}
@@ -313,6 +313,61 @@ lists), `beforeHide()` (drop the scroll room in the hide's commit:
 `useScrollRoom` returns `{dropNow}`), `bottomAnchored` (optional). Pause
 your own "stick to newest" while `vp.interactive`.
 
+### Send motion (kit parts)
+
+```ts
+import {
+  flySourceOfField, runSendFly, rectOf, prefersReducedMotion, type FlySource, type FlyMotion,
+  createListGlider, incomingMotion, fadeInRows, arrivedRows, type ListGlider,
+  useDeliverBrighten, SENDING_OPACITY,
+} from "src/kit/mobileChat";
+import "src/kit/mobileChat/sendFly.css"; // zen-bubble-fade, zen-bubble-breathe, zen-pill-in
+```
+
+- **Fly** (`sendFly.ts`): `flySourceOfField(textarea)` reads the field at
+  Send (the FLIP "first"); `runSendFly({ root, bubble, source, done,
+  target, glide, tailClass?, textSelector? })` flies the text into the
+  real bubble and returns a cancel. The kit imports nothing from the app:
+  the two app names it needs are options with defaults (`tailClass`,
+  default `FLY_TAIL_CLASS` = the lone-tail class from `chatBubbles.css`;
+  `textSelector`, default `FLY_TEXT_SELECTOR` = `.chat-markdown`, whose
+  font sets the text's scale).
+- **List glide** (`listGlide.ts`): `createListGlider(() => content)` is
+  the one owner of the list's transform (sends, arrivals, a drawer), so
+  every reason the list moves folds into one motion.
+- **Deliver brighten** (`useDeliverBrighten.ts`): the pending bubble rests
+  at `SENDING_OPACITY`, breathes after it lands, and brightens to 1 when
+  delivered (skipped while it flies: the fly's hand-off brightens it).
+
+**Wiring a new chat surface** (Home chat follows this; ThreadPane and
+TicketView are the full versions):
+
+1. Import `sendFly.css` once. The pane root is positioned; the fly's
+   layers mount there at `FLY_Z` (5): above the composer dock (z 2),
+   under the floating header (z 10).
+2. The composer's textarea sits inside an element marked
+   `data-composer-field` (GlassComposer does this) and clears in the Send
+   handler, snapping to one empty line (no eased collapse).
+3. At Send, BEFORE clearing: `flySourceOfField(textarea)` and the newest
+   row with its top (`{ el, top }`, the glide's anchor).
+4. Add the optimistic row in the same commit, keyed by something that the
+   server's copy keeps (a nonce, a localId): one element flies and lands.
+5. Fly or fade: reduced motion, no `Element.prototype.animate`, or no
+   source → fade (`zen-bubble-fade` on the bubble, clear after ~220 ms).
+6. The bubble while it flies: `data-fly-target="true"` and
+   `visibility: hidden`; its own padding, radius, background and
+   `data-tail` (the fly copies them, so palettes and grouping just work).
+7. A layout effect keyed on the send: apply the composer's new height to
+   the list's bottom padding unanimated, stick to the newest, take the
+   anchor's `dy`, then `runSendFly` with `glide: { content, dy, run: (d,
+   motion) => { glider.shift(d, { motion }); return () => {}; } }` when
+   `1 ≤ |dy| ≤ scroller height`. Return its cancel.
+8. Pending: `opacity: SENDING_OPACITY`, `zen-bubble-breathe` while pending
+   and not flying or fading, `useDeliverBrighten(ref, pending, breathing,
+   flying)`.
+9. Only this device's fresh send flies: arrivals, other devices' copies,
+   edits and retries of a bubble already on screen never do.
+
 ## Timing constants and curves
 
 | Constant | Value | Where / why |
@@ -333,7 +388,10 @@ your own "stick to newest" while `vp.interactive`.
 
 ## Message motion
 
-All compositor-only (transform / opacity), K2 code in `src/zen/`:
+All compositor-only (transform / opacity). The send fly, list glide and
+deliver brighten are kit parts in `src/kit/mobileChat/` (see
+[Send motion](#send-motion-kit-parts)); the receipt and runs are K2 code in
+`src/zen/`:
 
 - **Send fly** (`sendFly.ts`), matched frame by frame to a 30 fps screen
   recording of iMessage (tap → settled ≈ 0.42 s, 13 frames):

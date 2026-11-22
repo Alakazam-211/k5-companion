@@ -71,10 +71,12 @@ describe("threadModel", () => {
     expect(m?.from).toBe("k2so-Skin-Test-A");
   });
 
-  it("drops empty-body items and keeps choice cards", () => {
+  it("drops empty plain messages, keeps an empty card of any other kind (as a fallback card), and keeps choice cards", () => {
+    expect(normaliseThreadItem({ id: "t", seq: 1, doc: { kind: "text", from: "k2", body: "" } }, "bob")).toBeNull();
+    // A kind this app doesn't know never vanishes: it shows the fallback card.
     expect(
       normaliseThreadItem({ id: "x", seq: 1, doc: { kind: "event", from: "k2", body: "" } }, "bob")
-    ).toBeNull();
+    ).toMatchObject({ id: "x", kind: "event", text: "", unsupportedCard: true });
     const c = normaliseThreadItem(
       {
         id: "c1",

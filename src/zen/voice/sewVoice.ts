@@ -4,6 +4,7 @@ import { isIosWebView } from "../../lib/nativePicker";
 import { shareOrSaveBytes, type ShareOutcome } from "../files/shareFile";
 import type { CameraAsk, ConsentSheet, EngineEvents, EngineNow, PhoneVoiceEngine, SelfFlags } from "./voiceCall";
 import { nativeJoinErrorCode } from "./voiceWire";
+import { onPluginParticipants, onPluginState, onRecordingControls, onRecordingEvent } from "./callRecording";
 import { applyNoiseRemoval, type NoiseRemovalState } from "./noiseRemoval";
 
 // The call engine in this build (iOS): Sew's native voice plugin, in Rust
@@ -13,8 +14,11 @@ import { applyNoiseRemoval, type NoiseRemovalState } from "./noiseRemoval";
 //   - events `sew-voice://state` (the call), `sew-voice://participants`
 //     (your own mute and deafen, which the system's button or a moderator
 //     can change; the call tile's buttons send `mute {muted?, deafened?}`),
-//     `k2-voice://consent` (the recording notice, already in the kit's words)
-//     and `k2-voice://video` (the call has video: Sew's `video_changed`);
+//     `k2-voice://consent` (the recording notice's facts, which the page
+//     words as K2's own notice: OK or leave), `k2-voice://video` (the call
+//     has video: Sew's `video_changed`), and `sew-voice://recording` /
+//     `sew-voice://recording_controls` for Record and Stop
+//     (callRecording.ts);
 //   - "Join with camera": `camera_permission` / `request_camera_permission`
 //     (the plugin never prompts on its own), then K2's `voice_join_camera`
 //     (Sew's `join_with`: CallKit starts a video call);
@@ -106,25 +110,22 @@ export function listenDmCallIds(fn: (ids: NativeDmCallIds | null) => void): () =
   };
 }
 
+/** Rust's `k2-voice://consent` sheet (voice.rs `consent_sheet`, its own
+ *  camelCase JSON, not the plugin's): the notice's facts, which the page
+ *  words as K2's own notice (K2 0.46.11). */
 export function parseConsentSheet(body: unknown): ConsentSheet | null {
   if (!body || typeof body !== "object") return null;
   const b = body as Record<string, unknown>;
-  if (typeof b.title !== "string" || typeof b.text !== "string" || typeof b.noticeVersion !== "number") return null;
-  const choices = Array.isArray(b.choices)
-    ? b.choices.flatMap((c) => {
-        const x = c && typeof c === "object" ? (c as Record<string, unknown>) : {};
-        if (typeof x.label !== "string") return [];
-        return [{ label: x.label, granted: typeof x.granted === "boolean" ? x.granted : null }];
-      })
-    : [];
-  if (choices.length === 0) return null;
+  if (typeof b.noticeVersion !== "number") return null;
   return {
     ask: b.ask === "join" ? "join" : "in_call",
     ...(typeof b.recordingId === "string" ? { recordingId: b.recordingId } : {}),
     noticeVersion: b.noticeVersion,
-    title: b.title,
-    text: b.text,
-    choices,
+    startedByName: typeof b.startedByName === "string" && b.startedByName.trim() ? b.startedByName : null,
+    required: b.required === true,
+    audioKeepDays: typeof b.audioKeepDays === "number" && b.audioKeepDays >= 0 ? b.audioKeepDays : 0,
+    appReaders: Array.isArray(b.appReaders) ? b.appReaders.filter((x): x is string => typeof x === "string") : [],
+    agentReaders: b.agentReaders === true,
   };
 }
 
@@ -231,31 +232,85 @@ export async function shareCallLog(): Promise<ShareOutcome> {
   return shareOrSaveBytes(new TextEncoder().encode(text), "K2 call log.txt", "text/plain");
 }
 
-/** The noise removal state as call log codes: `noise standard standard dfn3
- *  phone_mode:os`, then the stage's timing when the plugin sends it (Sew
- *  0.10.4): `step_down_reason:slow_window last_step_down_ms_ago:1200
- *  slowest_block_us:9100 blocks_over_budget:3 in_grace:true
- *  capture_stage_strikes:1 capture_stage_bypassed:budget
- *  capture_stage_p99_us:6400`. Each word only when its field is there. */
+/** The fields the call log prints first, in this order (old logs read the
+ *  same): the reasons and the phone's capture, the stage's timing (Sew
+ *  0.10.4), then DeepFilterNet3's state and the grace window (Sew 0.11.1). */
+const NOISE_KNOWN = [
+  "reason",
+  "model_reason",
+  "step_downs",
+  "phone_mode",
+  "phone_mode_reason",
+  "phone_mode_switches",
+  "phone_mode_gap_ms",
+  "step_down_reason",
+  "last_step_down_ms_ago",
+  "slowest_block_us",
+  "blocks_over_budget",
+  "in_grace",
+  "capture_stage_strikes",
+  "capture_stage_bypassed",
+  "capture_stage_p99_us",
+  "dfn3_state",
+  "retry_in_ms",
+  "grace_step_downs",
+  "slowest_block_cpu_us",
+  "p99_block_us",
+  "p99_block_cpu_us",
+  "capture_stage_clock",
+  "capture_stage_max_wall_us",
+  "capture_stage_preempted_over_budget",
+  "capture_stage_starved",
+  "capture_stage_grace",
+  "capture_stage_grace_blocks",
+  "capture_stage_grace_over_budget",
+  "capture_stage_last_transient",
+  "capture_stage_dsp_scheduling",
+  "capture_stage_dsp_sched_requested",
+  "capture_stage_dsp_sched_effective",
+  "capture_stage_dsp_sched_fallback",
+  "capture_stage_dsp_period_us",
+  "capture_stage_dsp_computation_us",
+  "capture_stage_dsp_constraint_us",
+  "capture_stage_dsp_interval_deadline_us",
+  "capture_stage_dsp_intervals",
+] as const;
+
+/** A field's value as the call log writes it: false, 0 and null too;
+ *  objects and arrays as compact JSON. */
+function noiseValue(v: unknown): string {
+  if (v === null) return "null";
+  if (typeof v === "object") {
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return "unreadable";
+    }
+  }
+  return String(v);
+}
+
+/** The noise removal state as call log codes: `noise standard standard dfn3`
+ *  (mode, active, model), then every other field of the payload as
+ *  `key:value`, false, 0 and null included: the known fields first in
+ *  their order (`model_reason:budget step_downs:0 phone_mode:os …
+ *  in_grace:false …`), then any other field by name, so nothing the plugin
+ *  sends is dropped. */
 export function noiseWords(s: NoiseRemovalState | null | undefined): string[] | null {
   if (!s || typeof s !== "object" || typeof s.mode !== "string") return null;
   const words = ["noise", s.mode, String(s.active ?? "")];
-  if (s.model) words.push(s.model);
-  if (s.reason) words.push(`reason:${s.reason}`);
-  if (s.model_reason) words.push(`model_reason:${s.model_reason}`);
-  if (s.step_downs) words.push(`step_downs:${s.step_downs}`);
-  if (s.phone_mode) words.push(`phone_mode:${s.phone_mode}`);
-  if (s.phone_mode_reason) words.push(`phone_mode_reason:${s.phone_mode_reason}`);
-  if (s.phone_mode_switches) words.push(`phone_mode_switches:${s.phone_mode_switches}`);
-  if (typeof s.phone_mode_gap_ms === "number") words.push(`phone_mode_gap_ms:${s.phone_mode_gap_ms}`);
-  if (s.step_down_reason) words.push(`step_down_reason:${s.step_down_reason}`);
-  if (typeof s.last_step_down_ms_ago === "number") words.push(`last_step_down_ms_ago:${s.last_step_down_ms_ago}`);
-  if (typeof s.slowest_block_us === "number") words.push(`slowest_block_us:${s.slowest_block_us}`);
-  if (s.blocks_over_budget) words.push(`blocks_over_budget:${s.blocks_over_budget}`);
-  if (s.in_grace === true) words.push("in_grace:true");
-  if (s.capture_stage_strikes) words.push(`capture_stage_strikes:${s.capture_stage_strikes}`);
-  if (s.capture_stage_bypassed) words.push(`capture_stage_bypassed:${s.capture_stage_bypassed}`);
-  if (typeof s.capture_stage_p99_us === "number") words.push(`capture_stage_p99_us:${s.capture_stage_p99_us}`);
+  const printed = new Set<string>(["mode", "active"]);
+  if (typeof s.model === "string" && s.model) {
+    words.push(s.model);
+    printed.add("model");
+  }
+  const word = (key: string) => {
+    if (printed.has(key) || !Object.prototype.hasOwnProperty.call(s, key) || s[key] === undefined) return;
+    printed.add(key);
+    words.push(`${key}:${noiseValue(s[key])}`);
+  };
+  for (const key of NOISE_KNOWN) word(key);
+  for (const key of Object.keys(s).sort()) word(key);
   return words;
 }
 
@@ -271,6 +326,7 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
   function follow(): Promise<UnlistenFn[]> {
     listening ??= Promise.all([
       listen<StatePayload>("sew-voice://state", ({ payload }) => {
+        onPluginState(payload);
         const s = payload?.state;
         if (s === "connecting" || s === "connected" || s === "reconnecting") events?.onState(s);
         else if (s === "consent_required") events?.onState("held");
@@ -281,6 +337,9 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
       }),
       listen<unknown>("k2-voice://consent", ({ payload }) => events?.onConsent?.(parseConsentSheet(payload))),
       listen<unknown>("k2-voice://video", ({ payload }) => events?.onVideo?.(payload === true)),
+      // Record and Stop (K2 0.46.11): callRecording.ts follows these.
+      listen<unknown>("sew-voice://recording", ({ payload }) => onRecordingEvent(payload)),
+      listen<unknown>("sew-voice://recording_controls", ({ payload }) => onRecordingControls(payload)),
       listen<NoiseRemovalState>("sew-voice://noise_removal", ({ payload }) => noteNoise(payload)),
       // Each join's (and re-join's) K2 call id: for session/leave.
       listen<unknown>("k2-voice://dm-call", ({ payload }) => {
@@ -288,6 +347,7 @@ export function sewVoiceEngine(): PhoneVoiceEngine {
         if (ids) events?.onCallId?.(ids.room, ids.callId);
       }),
       listen<Row[]>("sew-voice://participants", ({ payload }) => {
+        onPluginParticipants(payload);
         const me = Array.isArray(payload) ? payload.find((p) => p?.is_self) : undefined;
         if (me) events?.onSelfMute?.(me.muted === true || me.deafened === true, selfFlags(me));
       }),

@@ -193,6 +193,16 @@ export function resolveScheme(mode: SchemeMode, systemLight = systemPrefersLight
   return mode === "auto" ? (systemLight ? "light" : "dark") : mode;
 }
 
+/** The palette for screens that stay dark whatever the mode (the
+ *  terminal, the owner 2026-11-19: "Even if light mode is on the terminal
+ *  view theme should always be obsidian or dusk"): the one on screen when
+ *  it's dark, else the person's dark-side pick when that's dark, else
+ *  Obsidian. */
+export function darkPaletteFor(sel: ThemeSelection, shown: PaletteId): PaletteId {
+  for (const id of [shown, sel.dark]) if (paletteById(id)?.scheme === "dark") return id;
+  return "obsidian";
+}
+
 /** The palette on screen for a selection. */
 export function resolvePalette(sel: ThemeSelection, systemLight = systemPrefersLight()): PaletteId {
   return sel[resolveScheme(sel.mode, systemLight)];

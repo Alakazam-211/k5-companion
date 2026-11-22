@@ -55,6 +55,9 @@ export type PermissionItem = {
   proof: PermissionProof;
   answer: { decision: string; by: string; via: string; at: number | null; reason: string | null } | null;
   undo: { label: string; until: number | null } | null;
+  /** K2's own form this card needs before Allow (`form: "<id>"`), if K2
+   *  marks it. See `cardForm`. */
+  form: string | null;
 };
 
 export type PermissionCardModel =
@@ -135,7 +138,7 @@ function proof(v: unknown): PermissionProof {
   return { kind: "click" };
 }
 
-function item(o: O): PermissionItem {
+function item(o: O, form = ""): PermissionItem {
   const why = obj(o.why);
   const ans = obj(o.answer);
   const undo = obj(o.undo);
@@ -167,6 +170,7 @@ function item(o: O): PermissionItem {
       ? { decision: str(ans.decision), by: str(ans.by), via: str(ans.via), at: num(ans.at), reason: str(ans.reason) || null }
       : null,
     undo: undo && str(undo.label) ? { label: str(undo.label), until: num(undo.until) } : null,
+    form: str(o.form) || form || null,
   };
 }
 
@@ -199,7 +203,7 @@ export function parsePermissionCard(choice: unknown): PermissionCardModel | null
       items: (Array.isArray(view.items) ? view.items : [])
         .map((x) => obj(x))
         .filter((x): x is O => !!x && !!str(x.requestId))
-        .map(item),
+        .map((x) => item(x)),
       approvers: approvers(view.approvers),
       expiresAt: num(view.expiresAt),
       options,
@@ -213,7 +217,7 @@ export function parsePermissionCard(choice: unknown): PermissionCardModel | null
     kind: "permission",
     state: state(view.state),
     viewer: viewer(view.viewer),
-    item: item(view),
+    item: item(view, str(action.form)),
     approvers: approvers(view.approvers),
     noteBox: { allowed: nb.allowed === true, max: num(nb.max) ?? 500, mine: str(nb.mine) || null },
     expiresAt: num(view.expiresAt),
@@ -281,4 +285,24 @@ export function noteProblem(text: string, max: number): string | null {
 /** Pending items of a batch. */
 export function pendingItems(card: Extract<PermissionCardModel, { kind: "batch" }>): PermissionItem[] {
   return card.items.filter((i) => i.state === "pending");
+}
+
+// ─── Cards that need K2's own form ───
+
+/** This server's GitHub credential for compute jobs (K2 0.46.10). */
+export const GIT_ACCESS_SETUP_ACTION = "compute.git-access-setup";
+/** The form id for it (`form: "git-access-setup"`). */
+export const GIT_ACCESS_SETUP_FORM = "git-access-setup";
+
+/** Cards whose Allow waits on a K2 form the phone doesn't draw: the site
+ *  PIN (`publish.pin`, refused 409 `pin_form_first` until it's set). */
+const FORM_ELSEWHERE_ACTIONS = new Set(["publish.pin"]);
+
+/** What stands in for Allow on this item: the GitHub setup form the phone
+ *  draws, `"elsewhere"` for a form the phone can't draw (Allow can't work
+ *  here: set it up in K2 on a computer), or null (plain Allow). */
+export function cardForm(item: Pick<PermissionItem, "action" | "form">): "git-access-setup" | "elsewhere" | null {
+  if (item.form) return item.form === GIT_ACCESS_SETUP_FORM ? "git-access-setup" : "elsewhere";
+  if (item.action === GIT_ACCESS_SETUP_ACTION) return "git-access-setup";
+  return FORM_ELSEWHERE_ACTIONS.has(item.action) ? "elsewhere" : null;
 }

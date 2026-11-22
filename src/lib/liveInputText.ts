@@ -23,6 +23,8 @@
 //
 // Pure + Node-testable (scripts/test-live-input.mjs).
 
+import { stickyCtrlBytes } from './terminalKeys.ts'
+
 // Why: iOS smart punctuation can rewrite two ASCII hyphens into a single
 // Unicode dash before the input event delivers terminal text.
 const IOS_SMART_DASH_REPLACEMENT_PATTERN = /[–—]/g
@@ -149,6 +151,9 @@ export type LiveInputSink = {
   sendBytes: (bytes: string) => void
   /** Mirror local-edit / clear results back into the hidden field. */
   setFieldValue: (value: string) => void
+  /** The armed sticky Ctrl was used up (a typed key took it, or a
+   *  control byte went out) — the owner clears its pressed look. */
+  onCtrlDisarm?: () => void
 }
 
 /** One per mounted capture. The component forwards raw DOM events;
@@ -158,6 +163,7 @@ export class LiveTextCommitPipeline {
   private pending = ''
   private composing = false
   private timer: ReturnType<typeof setTimeout> | null = null
+  private ctrlArmed = false
   private sink: LiveInputSink
 
   // No TS parameter property: Node's native type-stripping (the test
@@ -172,6 +178,22 @@ export class LiveTextCommitPipeline {
 
   get pendingText(): string {
     return this.pending
+  }
+
+  get isCtrlArmed(): boolean {
+    return this.ctrlArmed
+  }
+
+  /** The sticky Ctrl key (AccessoryBar). Armed, the NEXT typed
+   *  character goes out as its control byte (terminalKeys'
+   *  stickyCtrlBytes) instead of itself — exactly one byte, the letter
+   *  never inserted — and Ctrl disarms. A character Ctrl means nothing
+   *  for disarms and is sent plainly. Any control byte (accessory key,
+   *  Enter, Backspace, Tab) also disarms. Set by the owner; never
+   *  reported back for an owner-driven change, only via onCtrlDisarm
+   *  when the pipeline uses it up. */
+  setCtrlArmed(armed: boolean): void {
+    this.ctrlArmed = armed
   }
 
   /** `compositionstart`: anything deferred BEFORE the IME opened must
@@ -193,7 +215,10 @@ export class LiveTextCommitPipeline {
     this.composing = false
     this.pending = ''
     this.sink.setFieldValue('')
-    const out = normalizeTerminalTextInput(text)
+    let out = normalizeTerminalTextInput(text)
+    if (this.ctrlArmed && out.length > 0) {
+      out = this.takeCtrl(out)
+    }
     if (out.length > 0) {
       this.sink.sendBytes(out)
     }
@@ -210,6 +235,30 @@ export class LiveTextCommitPipeline {
       return
     }
     this.cancelTimer()
+    if (this.ctrlArmed) {
+      let fresh = value.replace(/[\r\n]/g, '')
+      // Text deferred before Ctrl was armed lands first, in typed order;
+      // Ctrl applies to what was typed after it.
+      if (this.pending.length > 0 && fresh.startsWith(this.pending)) {
+        fresh = fresh.slice(this.pending.length)
+        this.flushPending()
+      }
+      // (Pending text the field no longer starts with — a local edit
+      // raced it — skips Ctrl this once; it stays armed.)
+      if (this.pending.length === 0 && fresh.length > 0) {
+        this.sink.setFieldValue('')
+        const rest = this.takeCtrl(fresh)
+        if (rest === fresh) {
+          // Not a Ctrl key: Ctrl is gone, the character goes plainly.
+          value = fresh
+        } else if (rest.length === 0) {
+          return
+        } else {
+          // Rare multi-character insert: the rest goes plainly.
+          value = rest
+        }
+      }
+    }
     const text = normalizeTerminalTextInput(value.replace(/[\r\n]/g, ''), this.pending)
     const decision = getTextChangeDecision(text)
     if (decision.kind === 'ignore') {
@@ -244,6 +293,7 @@ export class LiveTextCommitPipeline {
    *  mid-composition force-commits what the IME had (clearing the
    *  field ends the session) so e.g. Ctrl+C still lands in order. */
   controlBytes(bytes: string, localEdit?: LiveLocalEdit): void {
+    this.disarmCtrl()
     if (this.composing && localEdit) {
       // The IME owns backspace inside its own composition.
       return
@@ -272,6 +322,27 @@ export class LiveTextCommitPipeline {
     this.cancelTimer()
     this.pending = ''
     this.composing = false
+    this.ctrlArmed = false
+  }
+
+  /** Armed Ctrl takes the first character of `text`: disarms, sends its
+   *  control byte when it has one, and returns what is left to send
+   *  plainly — `text` itself (same string) when Ctrl means nothing for
+   *  that character. */
+  private takeCtrl(text: string): string {
+    const first = Array.from(text)[0]
+    this.disarmCtrl()
+    if (first === undefined) return text
+    const ctrl = stickyCtrlBytes(first)
+    if (ctrl === null) return text
+    this.sink.sendBytes(ctrl)
+    return text.slice(first.length)
+  }
+
+  private disarmCtrl(): void {
+    if (!this.ctrlArmed) return
+    this.ctrlArmed = false
+    this.sink.onCtrlDisarm?.()
   }
 
   private armTimer(delayMs: number | null): void {

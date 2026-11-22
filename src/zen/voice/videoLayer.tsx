@@ -37,6 +37,7 @@ import {
   useVideoTile,
   type TileHandle,
 } from "./videoTile";
+import { useNativeSelfViewTile, type SelfCamera } from "./nativeSelfView";
 import { useVoiceCall } from "./voiceCall";
 
 // Where the call's one native video layer (K2PiP's AVSampleBufferDisplayLayer,
@@ -567,6 +568,37 @@ export function SelfView({
         onResize={frame}
       />
       {paused ? <Line text="Camera paused" /> : !playing ? untilFrame : null}
+    </div>
+  );
+}
+
+/** Your own tile's box while Swift draws your camera over it (the native
+ *  self-view, nativeSelfView.ts): the page opens no webview sink here, only
+ *  keeps the box (black until the first frame, under the native view) and
+ *  says "Camera paused" while the view is hidden for that. */
+export function NativeSelfSlot({
+  camera,
+  covered,
+  radius = TILE_RADIUS,
+}: {
+  camera: SelfCamera;
+  covered: boolean;
+  radius?: number;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useNativeSelfViewTile(ref, { camera, covered, radius });
+  const paused = camera === "paused";
+  return (
+    <div
+      ref={ref}
+      className="absolute inset-0 overflow-hidden"
+      style={{ borderRadius: radius, background: "#000" }}
+      aria-label="Your camera"
+      data-testid="voice-self-view"
+      data-native="yes"
+      data-paused={paused ? "yes" : "no"}
+    >
+      {paused ? <Line text="Camera paused" /> : null}
     </div>
   );
 }

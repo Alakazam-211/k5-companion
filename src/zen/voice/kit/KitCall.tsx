@@ -17,12 +17,24 @@ import { createPortal } from "react-dom";
 import type { Member } from "@sew/client/proto";
 import { CallBar, CallView, useVoice, VoiceProvider, type HostTileInfo, type VoiceUi } from "@sew/voice";
 import { useServersStore } from "../../../stores/servers";
-import { useCallDuration } from "../callDuration";
+import { useCallDuration, useElapsedSince } from "../callDuration";
+import { Circle, CircleStop } from "lucide-react";
+import { scopeFor } from "../../../api/scope";
+import { subscribeAppEvents } from "../../ticketEvents";
+import {
+  readRecordingRights,
+  recordingButtons,
+  recordingCommand,
+  useCallRecording,
+} from "../callRecording";
+import { isAccessChanged } from "../voiceApi";
+import { startRecordingFeed } from "../recordingFeed";
 import { serverDisplayName } from "../../homeView";
-import { LayerSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
+import { probeNativeSelfView, useNativeSelfView } from "../nativeSelfView";
+import { LayerSlot, NativeSelfSlot, SelfView, useLayerPlacement, useLiveVideo, VideoTile } from "../videoLayer";
 import { useVoiceCall, type CallRoom } from "../voiceCall";
 import { occupantByMember, roomByKey, useVoiceNames } from "../voiceNames";
-import type { VoiceRoom } from "../voiceWire";
+import { recordUnavailableText, type VoiceRoom } from "../voiceWire";
 import type { LayerVideo } from "./layerVideo";
 import { kitChannelId, kitRoomOf, kitSelfId, note, sewKit } from "./sewKit";
 
@@ -39,14 +51,23 @@ import { kitChannelId, kitRoomOf, kitSelfId, note, sewKit } from "./sewKit";
 //     are here only, never on the floating call tile;
 //   - your own tile, while your camera is on: `SelfView` in its rect (the
 //     kit's `local:camera` sink, mirrored for the front camera, "Camera
-//     paused" in the background). Never the native layer, never PiP.
+//     paused" in the background). Never the native layer, never PiP. On
+//     iOS the native self-view draws it instead (nativeSelfView.ts: Swift's
+//     own display layer over the tile's box, from Sew's `local:camera`
+//     native sink, about one frame behind the camera); the box stays here.
 // The phone's own parts stay around it in VoiceRooms.tsx: the recording
 // notice (ConsentSheet, wired to CallKit and the background notice; the
 // kit's RecordingConsent is never placed), and the floating call tile
 // outside the call screen (callTile.tsx).
 //
-// Hidden until K2 passes Sew's API through and a gateway feeds the store:
-// RecordingBadge/RecordingControls (need the store), VoiceChannelMembers
+// Record and Stop are the phone's own RecordingRow under the bar, not the
+// kit's RecordingBadge/RecordingControls: those read Sew's store and call
+// Sew's API (`/channels/{id}/recording/start`) through the host's `send`,
+// which the phone doesn't have (K2's door passes only the call-credential
+// routes), and never read the plugin's `recording_controls`. The row
+// follows the plugin and presses Record and Stop through it, so K2 posts
+// them with the phone's own login (callRecording.ts). Hidden until K2
+// passes Sew's API through and a gateway feeds the store: VoiceChannelMembers
 // (not placed). The screen button shows once the broadcast extension's ring
 // is armed for the call (layerVideo.ts). The bar's device check opens the
 // webview's own mic prompt, so its button is hidden and never answers here
@@ -111,10 +132,13 @@ export function AvatarNote({ memberId, video }: { memberId: string; video: Layer
   );
 }
 
-/** Your own tile's video rect while your camera is on. */
-function Self({ handle, video }: { handle: HostTileInfo["handle"]; video: LayerVideo }) {
-  const paused = useLayerVideo(video, (v) => v.selfState() === "paused");
-  return <SelfView handle={handle} paused={paused} />;
+/** Your own tile's video rect while your camera is on: the native self-view
+ *  where the shell has one (no webview sink then), else the kit's sink. */
+export function Self({ handle, video, covered }: { handle: HostTileInfo["handle"]; video: LayerVideo; covered: boolean }) {
+  const camera = useLayerVideo(video, (v) => v.selfState());
+  const native = useNativeSelfView((s) => s.available);
+  if (native) return <NativeSelfSlot camera={camera} covered={covered} />;
+  return <SelfView handle={handle} paused={camera === "paused"} />;
 }
 
 /** Names for the kit, from what the phone knows: the rooms lists (each
@@ -192,7 +216,9 @@ function People({ covered, video }: { covered: boolean; video: LayerVideo }) {
       {live && !hosted ? <VideoTile covered={covered} /> : null}
       <CallView
         channelId={v.channelId}
-        renderTile={(t: HostTileInfo) => (t.participant.local ? <Self handle={t.handle} video={video} /> : <LayerSlot />)}
+        renderTile={(t: HostTileInfo) =>
+          t.participant.local ? <Self handle={t.handle} video={video} covered={covered} /> : <LayerSlot />
+        }
         // The layer goes on someone else's tile only: never yours.
         onTileRect={(t: HostTileInfo, rect) => {
           if (!t.participant.local) place(rect);
@@ -254,6 +280,98 @@ function BarTime({ scope }: { scope: RefObject<HTMLElement | null> }) {
   return time ? createPortal(`\u00a0· ${time}`, slot) : null;
 }
 
+/** Re-reads the person's rights in the call's room (callRecording.ts): on
+ *  connecting, after a room change (the plugin's room; asked of K2 by the
+ *  room's slug when the rooms list knows it), whenever the recording
+ *  changes, on K2's `access_changed`, and (K2 0.46.17) on Sew's
+ *  `perms_changed` for the call's channel or space from the call's event
+ *  feed, open while connected (recordingFeed.ts). */
+function useRecordingRights(room: CallRoom): void {
+  const connected = useVoiceCall((s) => s.phase === "connected");
+  const pluginRoom = useCallRecording((s) => s.room) ?? room.roomId;
+  const askRoom = useVoiceNames((s) => roomByKey(s.rooms[room.serverId], pluginRoom)?.id ?? pluginRoom);
+  const recordingId = useCallRecording((s) => s.recording?.recordingId ?? null);
+  const [access, setAccess] = useState(0);
+  useEffect(() => {
+    const live = subscribeAppEvents(scopeFor(room.serverId), isAccessChanged, () => setAccess((n) => n + 1));
+    return () => live.stop();
+  }, [room.serverId]);
+  useEffect(() => {
+    if (!connected) return;
+    const feed = startRecordingFeed(room.serverId, () => setAccess((n) => n + 1));
+    return () => feed.stop();
+  }, [connected, room.serverId]);
+  useEffect(() => {
+    if (connected) void readRecordingRights(room.serverId, askRoom, pluginRoom);
+  }, [connected, room.serverId, askRoom, pluginRoom, recordingId, access]);
+}
+
+/** The call's recording under the bar (K2 0.46.11, as desktop): the badge
+ *  while a recording is on (with its running time from Sew's `started_at`),
+ *  Record and Stop as the plugin allows them, Sew's hint when Record would
+ *  be refused for now, and a refusal in K2's words. */
+export function RecordingRow({ room }: { room: CallRoom }) {
+  useRecordingRights(room);
+  const rec = useCallRecording();
+  const { canRecord, canStop, recordUnavailable } = recordingButtons(rec);
+  const running = useElapsedSince(rec.recording?.startedAt ?? null);
+  const hint = recordUnavailableText(recordUnavailable);
+  const on = rec.recording !== null;
+  if (!on && !canRecord && !canStop && !rec.error) return null;
+  return (
+    <div className="k2-kit-recording" data-testid="voice-recording">
+      {on ? (
+        <p className="sv-rec-badge" role="status" data-testid="voice-recording-badge">
+          <span className="sv-rec-badge-dot" aria-hidden="true" />
+          <span className="sv-rec-badge-word">{rec.recording?.live ? "Recording" : "Starting recording…"}</span>
+          {running ? (
+            <span className="k2-kit-recording-time" data-testid="voice-recording-time">
+              {running}
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+      {canRecord || canStop ? (
+        <div className="sv-rec-controls" role="group" aria-label="Recording">
+          {canRecord ? (
+            <button
+              type="button"
+              className="sv-btn sv-btn-text sv-rec-start"
+              disabled={rec.busy || hint !== null}
+              aria-describedby={hint ? "voice-record-hint" : undefined}
+              onClick={() => void recordingCommand("start")}
+              data-testid="voice-record"
+            >
+              <Circle size={14} fill="currentColor" aria-hidden="true" /> Record
+            </button>
+          ) : null}
+          {canStop ? (
+            <button
+              type="button"
+              className="sv-btn sv-btn-text"
+              disabled={rec.busy}
+              onClick={() => void recordingCommand("stop")}
+              data-testid="voice-record-stop"
+            >
+              <CircleStop size={14} aria-hidden="true" /> Stop recording
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+      {hint ? (
+        <p id="voice-record-hint" className="k2-kit-recording-note" data-testid="voice-record-hint">
+          {hint}
+        </p>
+      ) : null}
+      {rec.error ? (
+        <p className="k2-kit-recording-error" role="alert" data-testid="voice-recording-error">
+          {rec.error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function Bar({ room, scope }: { room: CallRoom; scope: RefObject<HTMLElement | null> }) {
   const v = useVoice();
   if (v.phase === "idle") return <Joining room={room} />;
@@ -261,6 +379,7 @@ function Bar({ room, scope }: { room: CallRoom; scope: RefObject<HTMLElement | n
     <>
       <CallBar docked />
       <BarTime scope={scope} />
+      <RecordingRow room={room} />
     </>
   );
 }
@@ -278,6 +397,8 @@ export default function KitCall() {
   useEffect(() => {
     if (key) kit.controller.dismissNotice();
   }, [key, kit]);
+  // Whether this shell draws your self-view natively (asked once, iOS only).
+  useEffect(() => probeNativeSelfView(), []);
   const ui = useMemo<VoiceUi>(() => {
     const username = (id: string) => {
       const s = servers.find((x) => x.id === id);

@@ -29,7 +29,7 @@ export const NOISE_REMOVAL_KEY = "k2.voice.noiseRemoval";
 export type NoiseMode = "standard" | "off";
 
 /** The plugin's answer and event (`NoiseRemovalState`). Every field but
- *  `mode` and `active` is absent when unset. */
+ *  `mode` and `active` may be absent. */
 export type NoiseRemovalState = {
   mode: NoiseMode | string;
   active: NoiseMode | string;
@@ -73,6 +73,55 @@ export type NoiseRemovalState = {
   capture_stage_bypassed?: "budget" | "fault" | string;
   /** The pipeline's 99th percentile of the stage's last 100 blocks, µs. */
   capture_stage_p99_us?: number;
+  // DeepFilterNet3's own state, its timing on the CPU clock and the
+  // pipeline's grace window (Sew 0.11.1 / plugin 0.9.1; each absent while
+  // unset or from an older plugin). The call log prints whatever arrives.
+  /** `idle`, `warming`, `running`, `stepped_down` or `retired`. */
+  dfn3_state?: "idle" | "warming" | "running" | "stepped_down" | "retired" | string;
+  /** While stepped down: when DeepFilterNet3 is retried, ms from now. */
+  retry_in_ms?: number;
+  /** Step-downs that failed inside a grace window (they don't retire DFN3). */
+  grace_step_downs?: number;
+  /** The slowest block on the audio thread's CPU clock, µs. */
+  slowest_block_cpu_us?: number;
+  /** The 99th percentile block, wall clock and CPU clock, µs. */
+  p99_block_us?: number;
+  p99_block_cpu_us?: number;
+  /** How the pipeline times the stage: `thread_cpu` or `wall`. */
+  capture_stage_clock?: "thread_cpu" | "wall" | string;
+  /** The stage's slowest block on the wall clock, µs. */
+  capture_stage_max_wall_us?: number;
+  /** Blocks over budget on the wall clock but not on the CPU clock (the
+   *  thread was pre-empted, not slow). */
+  capture_stage_preempted_over_budget?: number;
+  /** Blocks past the wall-clock starvation cutoff. */
+  capture_stage_starved?: number;
+  /** The pipeline's grace window is open. */
+  capture_stage_grace?: boolean;
+  /** Blocks run inside grace windows, and those over budget there. */
+  capture_stage_grace_blocks?: number;
+  capture_stage_grace_over_budget?: number;
+  /** The last busy moment: `call_start`, `audio_session_activated`,
+   *  `route_change`, `camera_start`, `app_scene_change` or `other`. */
+  capture_stage_last_transient?: string;
+  /** How the Apple DSP thread is scheduled (Sew 0.11.2, kessel-audio 0.2.4):
+   *  `workgroup` (joined the audio unit's workgroup), `time_constraint`,
+   *  `qos` or `none` (off Apple). Absent until the pipeline reports. */
+  capture_stage_dsp_scheduling?: "workgroup" | "time_constraint" | "qos" | "none" | string;
+  /** The DSP scheduling the host asked for and what is in effect (Sew
+   *  0.11.3, kessel-audio 0.2.5): `workgroup`, `time_constraint`, `none`,
+   *  `own_workgroup`; `fallback` says why the OS refused a mode. Each is
+   *  absent while unset or zero. */
+  capture_stage_dsp_sched_requested?: string;
+  capture_stage_dsp_sched_effective?: string;
+  capture_stage_dsp_sched_fallback?: string;
+  capture_stage_dsp_period_us?: number;
+  capture_stage_dsp_computation_us?: number;
+  capture_stage_dsp_constraint_us?: number;
+  capture_stage_dsp_interval_deadline_us?: number;
+  capture_stage_dsp_intervals?: number;
+  /** Anything a later plugin adds: the call log prints it too. */
+  [field: string]: unknown;
 };
 
 /** On unless "off" is stored. */

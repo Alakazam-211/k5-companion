@@ -146,13 +146,27 @@ final class K2PickerSession: NSObject, PHPickerViewControllerDelegate,
   }
 
   func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
-    picker.dismiss(animated: true)
+    // Answer once the sheet is gone, not as it starts to slide away: the
+    // page refocuses its field on the answer and asks for the keyboard,
+    // which a focus made under the departing sheet did not get (a
+    // cancelled pick left the composer in its typing gap with no
+    // keyboard). The group also holds the file reads below. A fallback
+    // leave so a completion UIKit never calls can't hold the pick open.
+    let group = DispatchGroup()
+    group.enter()
+    var dismissed = false
+    let leaveDismissed = {
+      if dismissed { return }
+      dismissed = true
+      group.leave()
+    }
+    picker.dismiss(animated: true) { leaveDismissed() }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { leaveDismissed() }
     if results.isEmpty {
-      finish([], cancelled: true)
+      group.notify(queue: .main) { self.finish([], cancelled: true) }
       return
     }
     var slots = [PickOutcome?](repeating: nil, count: results.count)
-    let group = DispatchGroup()
     let lock = NSLock()
     for (i, result) in results.enumerated() {
       let provider = result.itemProvider

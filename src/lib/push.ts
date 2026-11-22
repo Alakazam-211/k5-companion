@@ -20,6 +20,8 @@ import { entryMatchesHomeHost } from "../zen/homeServerIds";
 import { zenProjectPath, zenTicketPath } from "../zen/terminalJump";
 import { pushAvailability, pushIsAvailable } from "./pushAvailability";
 import { routeCallTap } from "../zen/calls/dmCall";
+import { HOME_CHAT_PUSH_KIND, homeChatTapTarget } from "./homeChatPush";
+import type { HomeChatTarget } from "../zen/homeChat/homeChatModel";
 import { badgeKeyFromReply, learnBadgeKey, normalizeBadgeKey, readBadgeKeys } from "./badgeKeys";
 import {
   FEATURE_PUSH_ENVIRONMENT,
@@ -128,6 +130,17 @@ export interface TapPayload {
    *  is generic; nothing is approved from the notification. */
   approval?: string;
   requestId?: string;
+  /** Home chat (K2 0.46.16 push kind `home_chat`): `conversationId` is the
+   *  DM or channel, `convKind` `dm` | `channel`; the sender's ext and name
+   *  (the DM's other person) and the channel's name. The generic lane has
+   *  none of these (a tap opens Home). */
+  convKind?: string;
+  messageId?: string;
+  reason?: string;
+  senderExt?: string;
+  senderName?: string;
+  channelName?: string;
+  passive?: string;
 }
 
 // ─── Availability (session-cached probe; see ./pushAvailability) ───
@@ -926,6 +939,41 @@ function openApprovalAfterTap(tap: TapPayload, serverId: string): void {
   );
 }
 
+/** Open a Home chat (lazy: the chat view's store is not push's to load). */
+function openHomeChatView(target: HomeChatTarget): void {
+  void import("../zen/homeChat/homeChatStore")
+    .then((m) => m.openHomeChat(target))
+    .catch((e) => console.warn("[push] home chat tap dropped:", e));
+}
+
+/** A Home chat tap: Home first, then that DM or channel over it, on the
+ *  push's own server (the saved server whose key opened it, else the one
+ *  its label names). The generic lane, or a server this phone doesn't
+ *  hold, stays on Home. Never switches the active server: Home chat is
+ *  per server already. */
+export async function routeHomeChatTap(
+  tap: TapPayload,
+  navigate: (path: string) => void,
+  open: (target: HomeChatTarget) => void = openHomeChatView
+): Promise<void> {
+  navigate("/zen");
+  const conv = str(tap.conversationId);
+  if (!/^\d{1,20}$/.test(conv)) return;
+  const saved = str(tap.k2ServerId);
+  let serverId: string | null =
+    saved && useServersStore.getState().servers.some((x) => x.id === saved) ? saved : null;
+  if (!serverId) {
+    try {
+      serverId = (await resolveTapServer(tap))?.id ?? null;
+    } catch {
+      serverId = null;
+    }
+  }
+  if (!serverId) return;
+  const target = homeChatTapTarget(tap, serverId);
+  if (target) open(target);
+}
+
 /** Route one tap.
  *
  *  Thread taps resolve their server first and are dropped when no saved
@@ -960,6 +1008,10 @@ export async function routeTap(
     } catch (e) {
       console.warn("[push] call tap dropped:", e);
     }
+    return;
+  }
+  if (kind === HOME_CHAT_PUSH_KIND) {
+    await routeHomeChatTap(tap, navigate);
     return;
   }
   if (kind !== "thread") {

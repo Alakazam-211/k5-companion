@@ -8,9 +8,20 @@ import type { StubAgent } from "./stubData";
 // (every fetched page and sends in flight) come from two or more senders
 // other than me (`mine`, so my other devices are me; system and bot lines
 // count). Once on they stay on while that Thread is open, and reset on a
-// switch. The picture sits beside the first bubble of each run (runs break
-// after 120 s, chatReceipt.ts). The column eases in and out as K2's does
-// (chatBubbles.css, K2 threadSenders.tsx).
+// switch. Every bubble from someone else gets the column, so they line up;
+// the picture draws once per run, on its LAST bubble, at the bottom left,
+// level with the tail (the owner 2026-11-18, the phone-chat place; K2
+// a096cbc1d2). The name line stays over the first bubble. A run ends
+// where the tail does (another sender, you, a 120 s gap, a deleted line:
+// chatReceipt.ts); a deleted line draws no picture. A new message from the
+// same sender takes the picture down to it (no animation: it just moves;
+// pictureRows, chatReceipt.ts).
+// The picture sits against the bubble, so files or reactions under it never
+// push it down. The column eases in and out as K2's does (chatBubbles.css,
+// K2 threadSenders.tsx).
+//
+// Home chat (homeChatRows, HomeChatMessageRow): always on in a channel,
+// never in a DM (only one other person); same place and size.
 
 export const THREAD_PICTURE_PX = 28;
 export const THREAD_PICTURE_GAP = 8;

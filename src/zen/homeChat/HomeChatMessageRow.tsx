@@ -8,28 +8,59 @@
 //     loaded" when it can't be shown);
 //   - reaction chips under the bubble;
 //   - a message just jumped to wears a fading accent wash (1.2 s);
-//   - a call's record is a LINE, never a bubble, with "Call back".
+//   - a call's record is a LINE, never a bubble, with "Call back";
+//   - in a channel, the sender column (never in a DM): every bubble of
+//     someone else's sits past it, and their picture sits beside the tail
+//     of their run's last bubble (threadPictures.ts, K2 a096cbc1d2).
+// The send motion is the Thread's (mobile chat kit): this device's new
+// bubble is laid out but hidden while the text flies into it
+// (`data-fly-target`), or fades in under reduced motion; Sending… it
+// breathes, and delivered it brightens (useDeliverBrighten).
 // The hold menu (React, Reply, Copy) is the view's: a bubble carries
 // MESSAGE_HOLD_ATTR and `useMessageHold` on the list does the rest.
 
-import { memo, type CSSProperties } from "react";
+import { memo, useRef, type CSSProperties } from "react";
 import type { HomeChatMessage } from "../../api/homeChatPure";
 import { callRecordLine } from "../../api/homeChatCallsPure";
 import { ChatMessageBody } from "../../components/ChatMessage";
 import { MESSAGE_HOLD_ATTR } from "../stash/useMessageHold";
-import { SENDING_OPACITY } from "../useDeliverBrighten";
+import { SENDING_OPACITY, useDeliverBrighten } from "../../kit/mobileChat/useDeliverBrighten";
 import { DELETED_TEXT, mountainTime } from "../threadModel";
 import { bubbleBodyStyle } from "../ThreadPane";
 import { PhoneIcon } from "../icons";
 import { zenTextPx } from "../zenFont";
 import type { RunPos } from "../chatReceipt";
-import { quoteText, type ReplyPreview } from "./homeChatModel";
+import { THREAD_PICTURE_GAP, THREAD_PICTURE_PX } from "../threadPictures";
+import { quoteText, type HomeChatFace, type ReplyPreview } from "./homeChatModel";
 import { ReactionChips } from "./HomeChatReactions";
+import { PersonAvatar } from "./HomeChatGlyphs";
 import "../chatBubbles.css";
+import "../../kit/mobileChat/sendFly.css";
 import "./homeChat.css";
 
 const NO_SELECT: CSSProperties = { userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" };
 const SELECTABLE: CSSProperties = { userSelect: "text", WebkitUserSelect: "text", WebkitTouchCallout: "default" };
+/** The sender column: the row's left margin (the bubble keeps its width). */
+const COLUMN_STYLE: CSSProperties = { marginLeft: THREAD_PICTURE_PX + THREAD_PICTURE_GAP };
+/** The picture, in the column at the bubble's bottom: level with its tail. */
+const PICTURE_STYLE: CSSProperties = { left: -(THREAD_PICTURE_PX + THREAD_PICTURE_GAP) };
+
+/** A sender's picture beside their run's last bubble. `data-lift-skip`:
+ *  the hold menu lifts the bubble alone (AgentMenu's liftCopy). */
+const HomeChatSenderPicture = memo(function HomeChatSenderPicture({ face }: { face: HomeChatFace }) {
+  return (
+    <span
+      className="absolute bottom-0"
+      style={PICTURE_STYLE}
+      aria-hidden
+      data-thread-picture=""
+      data-lift-skip=""
+      data-testid="home-chat-msg-picture"
+    >
+      <PersonAvatar username={face.username} name={face.name} picture={face.picture} pictureOf={face.pictureOf} size={THREAD_PICTURE_PX} fontSize={12} glass />
+    </span>
+  );
+});
 
 export interface HomeChatRowActions {
   toggleReaction: (msgId: string, emoji: string) => void;
@@ -75,11 +106,16 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   run,
   reply,
   flash,
+  mention = false,
   held,
   send,
   readOnly,
   canEdit,
   actions,
+  column = false,
+  face = null,
+  flying = false,
+  fadeIn = false,
 }: {
   m: HomeChatMessage;
   mine: boolean;
@@ -90,6 +126,8 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   reply: ReplyPreview | null;
   /** Just jumped to: the accent wash. */
   flash: boolean;
+  /** Someone else's message that mentions you: a quiet accent ring. */
+  mention?: boolean;
   /** Its hold menu is open: the ring that follows the bubble. */
   held: boolean;
   send: RowSend;
@@ -98,7 +136,21 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   /** A "Not sent" bubble can go back into the (empty) box. */
   canEdit: boolean;
   actions: HomeChatRowActions;
+  /** Someone else's in a channel: the sender column (homeChatRows). */
+  column?: boolean;
+  /** The last of their run: the picture beside the tail (one object per
+   *  person, so this memoized row compares it by identity). */
+  face?: HomeChatFace | null;
+  /** This device's send, laid out but hidden while its text flies in. */
+  flying?: boolean;
+  /** The same under reduced motion (or no Web Animations): it fades in. */
+  fadeIn?: boolean;
 }) {
+  const bubbleRef = useRef<HTMLDivElement>(null);
+  const pending = send?.status === "sending";
+  // Sending, landed: a gentle breathe; delivered: a gradual brighten.
+  const breathing = pending && !flying && !fadeIn;
+  useDeliverBrighten(bubbleRef, pending, breathing, flying);
   const optimistic = m.id.startsWith("~");
   const spaced = run.first;
   const side = mine ? "self-end items-end" : "self-start items-start";
@@ -108,6 +160,8 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
         data-home-chat-msg={m.id}
         data-testid="home-chat-msg-deleted"
         className={`relative flex flex-col max-w-[78%] min-w-0 ${side}${spaced ? " mt-1.5" : ""}`}
+        style={column ? COLUMN_STYLE : undefined}
+        data-sender-column={column ? "on" : undefined}
       >
         {flash ? <span aria-hidden className="k2-hc-wash" data-testid="home-chat-wash" /> : null}
         <span className="px-3 py-0.5 text-[13px] italic text-[var(--color-text-muted)] select-none">{DELETED_TEXT}</span>
@@ -116,9 +170,38 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
   }
   const holdable = !optimistic && Boolean(m.body.trim());
   const tail = run.last ? (mine ? "mine" : "theirs") : null;
-  const pending = send?.status === "sending";
   const failed = send?.status === "failed";
   const nonce = optimistic ? m.id.slice(1) : null;
+  const bubble = (
+    <div
+      ref={bubbleRef}
+      className={`relative px-3 py-2 leading-snug break-words min-w-0 max-w-full${tail ? " zen-tail" : ""}${fadeIn ? " zen-bubble-fade" : breathing ? " zen-bubble-breathe" : ""}${held ? " zen-outlined" : mention && !mine ? " k2-hc-mention" : ""}`}
+      data-testid="home-chat-bubble"
+      data-fly-target={flying ? "true" : undefined}
+      data-tail={tail || undefined}
+      data-mention={mention && !mine ? "" : undefined}
+      {...{ [MESSAGE_HOLD_ATTR]: holdable ? m.id : undefined }}
+      aria-haspopup={holdable ? "menu" : undefined}
+      aria-description={holdable ? "Hold the bubble to react, reply or copy" : undefined}
+      style={{
+        visibility: flying ? "hidden" : undefined,
+        ...(holdable ? NO_SELECT : null),
+        fontSize: zenTextPx(17),
+        borderRadius: 18,
+        background: mine ? "var(--color-accent-fill)" : "var(--color-bubble-agent)",
+        ["--k2-bubble" as string]: mine ? "var(--color-accent-fill)" : "var(--color-bubble-agent)",
+        color: mine ? "var(--color-on-accent)" : "var(--color-text-primary)",
+        // Sending: dimmed. Delivered: it only brightens, gradually
+        // (useDeliverBrighten); nothing moves.
+        opacity: pending ? SENDING_OPACITY : 1,
+      }}
+    >
+      <div className="min-w-0 max-w-full overflow-hidden" data-bubble-body="" style={SELECTABLE}>
+        {m.replyTo && reply ? <QuoteStrip preview={reply} onJump={() => actions.jump(m.replyTo!)} /> : null}
+        <ChatMessageBody text={m.body} className="!p-0" style={bubbleBodyStyle()} />
+      </div>
+    </div>
+  );
   return (
     <div
       data-home-chat-msg={m.id}
@@ -127,6 +210,8 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
       data-run={run.first && run.last ? "solo" : run.first ? "first" : run.last ? "last" : "middle"}
       data-flash={flash ? "" : undefined}
       className={`relative flex flex-col max-w-[78%] min-w-0 ${side}${spaced ? " mt-1.5" : ""}`}
+      style={column ? COLUMN_STYLE : undefined}
+      data-sender-column={column ? "on" : undefined}
     >
       {flash ? <span aria-hidden className="k2-hc-wash" data-testid="home-chat-wash" /> : null}
       {name ? (
@@ -146,28 +231,16 @@ export const HomeChatMessageRow = memo(function HomeChatMessageRow({
       {/* The bubble and its chips: what the hold menu lifts above the dim
           (the name line stays on the page, as iOS lifts only the bubble). */}
       <div className={`flex flex-col min-w-0 max-w-full ${mine ? "items-end" : "items-start"}`} data-home-chat-lift={m.id}>
-      <div
-        className={`relative px-3 py-2 leading-snug break-words min-w-0 max-w-full${tail ? " zen-tail" : ""}${held ? " zen-outlined" : ""}`}
-        data-testid="home-chat-bubble"
-        data-tail={tail || undefined}
-        {...{ [MESSAGE_HOLD_ATTR]: holdable ? m.id : undefined }}
-        aria-haspopup={holdable ? "menu" : undefined}
-        aria-description={holdable ? "Hold the bubble to react, reply or copy" : undefined}
-        style={{
-          ...(holdable ? NO_SELECT : null),
-          fontSize: zenTextPx(17),
-          borderRadius: 18,
-          background: mine ? "var(--color-accent-fill)" : "var(--color-bubble-agent)",
-          ["--k2-bubble" as string]: mine ? "var(--color-accent-fill)" : "var(--color-bubble-agent)",
-          color: mine ? "var(--color-on-accent)" : "var(--color-text-primary)",
-          opacity: pending ? SENDING_OPACITY : 1,
-        }}
-      >
-        <div className="min-w-0 max-w-full overflow-hidden" data-bubble-body="" style={SELECTABLE}>
-          {m.replyTo && reply ? <QuoteStrip preview={reply} onJump={() => actions.jump(m.replyTo!)} /> : null}
-          <ChatMessageBody text={m.body} className="!p-0" style={bubbleBodyStyle()} />
+      {/* In the column: the bubble in its own box, so the picture sits
+          against it and the chips under it never push it down. */}
+      {column ? (
+        <div className="relative min-w-0 max-w-full" data-home-chat-bubble-box="">
+          {bubble}
+          {face ? <HomeChatSenderPicture face={face} /> : null}
         </div>
-      </div>
+      ) : (
+        bubble
+      )}
       <ReactionChips
         reactions={m.reactions}
         mine={mine}

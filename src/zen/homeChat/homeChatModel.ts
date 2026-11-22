@@ -8,7 +8,8 @@
 
 import { HOME_CHAT_CHANNEL_NAME_MAX, type HomeChatMessage, type HomeChatPeople, type HomeChatPerson } from "../../api/homeChatPure";
 import { QUICK_REACTIONS } from "../../api/homeChatHelpers";
-import { chatRuns, type RunPos } from "../chatReceipt";
+import { chatRuns, pictureRows, type RunPos } from "../chatReceipt";
+import type { PersonPictureRef } from "./personPictures";
 
 // ─── What a chat is ───
 
@@ -97,6 +98,37 @@ export function memberNames(people: HomeChatPeople | null | undefined): Map<stri
 export function authorName(authorId: string, me: string | null, names: ReadonlyMap<string, string>): string {
   if (me && authorId === me) return "You";
   return names.get(authorId) ?? "Someone";
+}
+
+/** What a sender's picture draws (HomeChatGlyphs' PersonAvatar). */
+export interface HomeChatFace {
+  username: string;
+  name: string;
+  picture: string | null;
+  /** Their profile picture by rev (absent: the server doesn't say). */
+  pictureOf?: PersonPictureRef;
+}
+
+/** Who a person is for their profile picture (PersonAvatar `pictureOf`);
+ *  null when the server doesn't send `pictureRev` (older daemons). */
+export function pictureRefOf(
+  serverId: string | null | undefined,
+  p: { ext: string; username: string; pictureRev?: string | null } | null | undefined
+): PersonPictureRef | null {
+  if (!serverId || !p || !p.ext || p.pictureRev === undefined) return null;
+  return { serverId, ext: p.ext, username: p.username, rev: p.pictureRev };
+}
+
+/** A member's picture: their username (the colour), name (the initials)
+ *  and picture; a member K2 doesn't list: "Someone" on their id's colour.
+ *  With `serverId`, their profile picture's ref too. */
+export function homeChatFace(people: HomeChatPeople | null | undefined, memberId: string, serverId?: string): HomeChatFace {
+  const p = personByMember(people, memberId);
+  if (!p) return { username: memberId, name: "Someone", picture: null };
+  const face: HomeChatFace = { username: p.username, name: p.displayName || p.username, picture: p.picture ?? null };
+  const ref = pictureRefOf(serverId, p);
+  if (ref) face.pictureOf = ref;
+  return face;
 }
 
 /** The person behind a member id (their colour comes from the username). */
@@ -350,7 +382,19 @@ export type HomeChatRow =
       /** The name over its run (null: none, mine or a DM's own). */
       name: string | null;
       run: RunPos;
+      /** Someone else's in a channel: the sender column (homeChatColumnOn),
+       *  so their bubbles line up. False: yours, or any row in a DM. */
+      column: boolean;
+      /** The last of their run (pictureRows): their picture beside the
+       *  bubble's tail. Never a deleted line's. */
+      picture: boolean;
     };
+
+/** The sender column (pictures beside the bubbles, K2 a096cbc1d2): every
+ *  channel; never a DM, where the one other person needs no picture. */
+export function homeChatColumnOn(kind: "dm" | "channel"): boolean {
+  return kind === "channel";
+}
 
 /** Every message as a row: a call's record is a line, never a bubble (and
  *  never part of a run); the rest run as the Thread's do. Names: in a
@@ -362,14 +406,15 @@ export function homeChatRows(
   names: ReadonlyMap<string, string>,
   kind: "dm" | "channel"
 ): HomeChatRow[] {
-  const runs = chatRuns(
-    messages.map((m) => ({
-      mine: !!me && m.authorId === me,
-      from: m.authorId,
-      at: m.createdAtMs || null,
-      deleted: m.deleted || m.call !== null,
-    }))
-  );
+  const inputs = messages.map((m) => ({
+    mine: !!me && m.authorId === me,
+    from: m.authorId,
+    at: m.createdAtMs || null,
+    deleted: m.deleted || m.call !== null,
+  }));
+  const runs = chatRuns(inputs);
+  const pictures = pictureRows(inputs, runs);
+  const columnOn = homeChatColumnOn(kind);
   return messages.map((m, i) => {
     if (m.call) return { kind: "call", m };
     const mine = !!me && m.authorId === me;
@@ -377,7 +422,8 @@ export function homeChatRows(
     // A channel names every run; a DM only the other person's. Yours never
     // carry a name in either (the Thread's rule).
     const name = mine || !run.first ? null : authorName(m.authorId, me, names);
-    return { kind: "message", m, mine, name: kind === "channel" || !mine ? name : null, run };
+    const column = columnOn && !mine;
+    return { kind: "message", m, mine, name: kind === "channel" || !mine ? name : null, run, column, picture: column && pictures[i] };
   });
 }
 

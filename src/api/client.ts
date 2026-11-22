@@ -714,7 +714,30 @@ export type ThreadDoc = {
     closeReason?: unknown;
     answeredBy?: unknown;
   };
-  secret?: { prompt?: string };
+  /** A secret-request card (`k2 thread secret`), as K2's `SecretBody`.
+   *  Never a value. Parsed defensively by `parseThreadSecret`. */
+  secret?: {
+    name?: string;
+    status?: string;
+    prompt?: string | null;
+    scope?: string | null;
+    hosts?: string[];
+    delivery?: string | null;
+    secretKind?: string | null;
+    ref?: string | null;
+    answeredBy?: unknown;
+    answeredAt?: number | null;
+    expiresAt?: number | null;
+    inject?: { dst?: string; fmt?: string } | null;
+    envName?: string | null;
+    replaces?: boolean;
+    once?: boolean;
+    closedAs?: unknown;
+    closeReason?: unknown;
+  };
+  /** A card another agent's secret handoff drew (K2); this app has no card
+   *  for it, so it shows the fallback. */
+  handoff?: unknown;
   /** K2 0.46.1 `thread-attachments-v1`: files riding the message (parsed
    *  defensively by `parseThreadAttachments`). */
   attachments?: unknown;
@@ -861,8 +884,8 @@ export async function getActivitySnapshot(
 }
 
 /** Overlay choice card. Skin: POST `/cli/thread/answer`
- *  `{ addr, id, answer }` — `answer` is the option text. Secret cards
- *  are never posted. */
+ *  `{ addr, id, answer }` — `answer` is the option text. A secret card's
+ *  answer goes through `api/secretCard.ts` (the value in its body only). */
 export const answerThread = (
   scope: ServerScope,
   addr: string,

@@ -31,7 +31,7 @@ import {
 } from "./icons";
 import type { ThreadTurn } from "./threadTurn";
 import { zenTextPx } from "./zenFont";
-import { prefersReducedMotion } from "./sendFly";
+import { prefersReducedMotion } from "../kit/mobileChat/sendFly";
 import "./threadDrawer.css";
 
 // The Thread working drawer: a glass tile pulled out of the composer's top

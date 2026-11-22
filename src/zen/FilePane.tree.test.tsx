@@ -136,7 +136,7 @@ describe("Files drawer header", () => {
     expect(useZenStore.getState().filesOpen).toBe(false);
     // Same as the old arrow: closing the drawer keeps open files.
     expect(useZenStore.getState().openFileIds).toEqual([`${WS}/zeta.md`]);
-    expect(screen.queryByLabelText("Files")).toBeNull();
+    expect(screen.queryByTestId("files-title")).toBeNull();
   });
 
   it("the eye shows dotfiles and heavy folders, and remembers per device", async () => {
@@ -307,6 +307,26 @@ describe("press-and-hold menu", () => {
     fireEvent.pointerUp(row, { clientX: 100, clientY: 100, pointerId: 1 });
     fireEvent.click(row);
     expect(useZenStore.getState().openFileIds).toEqual([]);
+  });
+
+  it("the open file and the held row take the current-row tint; rows indent 14px a level", async () => {
+    live({ openFileIds: [`${WS}/zeta.md`] });
+    render(<FilePane />);
+    await screen.findByText("Alpha.ts");
+    const zeta = screen.getByLabelText("zeta.md");
+    expect(zeta.getAttribute("data-current")).toBe("1");
+    expect(zeta.className).toMatch(/k2-drawer-row/);
+    expect(zeta.className).toMatch(/text-\[14px\]/);
+    const alpha = screen.getByLabelText("Alpha.ts");
+    expect(alpha.getAttribute("data-current")).toBeNull();
+    expect(alpha.style.paddingLeft).toBe("10px");
+    fireEvent.click(screen.getByLabelText("src"));
+    const main = await screen.findByLabelText("main.ts");
+    expect(main.style.paddingLeft).toBe("24px");
+    vi.useFakeTimers();
+    await holdStill(alpha);
+    expect(screen.getAllByRole("menuitem").length).toBeGreaterThan(0);
+    expect(alpha.getAttribute("data-current")).toBe("1");
   });
 
   it("folders get Copy Path and Rename only (resources are files)", async () => {

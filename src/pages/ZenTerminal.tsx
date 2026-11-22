@@ -10,10 +10,8 @@ import { useWorkspacesStore } from "../stores/workspaces";
 import { TerminalView } from "../components/TerminalView";
 import { ensurePinnedChat, uploadFsBinary } from "../api/client";
 import { MessageComposer } from "../components/MessageComposer";
-import { AccessoryBar } from "../components/AccessoryBar";
-import { LiveInputCapture } from "../components/LiveInputCapture";
+import { TerminalDirectInput } from "../components/TerminalDirectInput";
 import { sendMessageToSession } from "../api/sendMessage";
-import type { LiveLocalEdit } from "../lib/liveInputText";
 import {
   modeFor,
   setSendMode,
@@ -54,6 +52,7 @@ import { ZEN_SERVER_PARAM, resolveServerRef, withServerParam } from "../zen/room
 import { PencilIcon } from "../zen/icons";
 import { useBackHandler } from "../lib/androidBack";
 import { useSwipeBack } from "../lib/useSwipeBack";
+import { useThemeStore } from "../theme/themeStore";
 import { EDGE_ARM_PX } from "../lib/swipeBack";
 
 const DEV_MODE: boolean = import.meta.env?.DEV ?? false;
@@ -78,6 +77,9 @@ export const ZEN_TERMINAL_HEADER_PX = 46;
  *  thread, never /sessions. No thread toggle here by design. */
 export function ZenTerminal() {
   const { terminalId } = useParams<{ terminalId: string }>();
+  // The terminal is always dark (the owner 2026-11-19): Obsidian or Dusk,
+  // even with Veil on screen, while this page is open.
+  useEffect(() => useThemeStore.getState().holdDark(), []);
   const navigate = useNavigate();
   const location = useLocation();
   const [search] = useSearchParams();
@@ -215,9 +217,6 @@ export function ZenTerminal() {
   const sendInputRef = useRef<((text: string) => void) | null>(null);
   const reloadRef = useRef<(() => void) | null>(null);
   const captureFocusRef = useRef<(() => void) | null>(null);
-  const sendKeyRef = useRef<
-    ((bytes: string, localEdit?: LiveLocalEdit) => void) | null
-  >(null);
   const [reloading, setReloading] = useState(false);
   const [debugInfo, setDebugInfo] = useState("");
 
@@ -590,17 +589,10 @@ export function ZenTerminal() {
             data-testid="zen-terminal-direct-bar"
             style={{ flexShrink: 0 }}
           >
-            <AccessoryBar
-              variant="zen"
-              onKey={(bytes, localEdit) => {
-                if (sendKeyRef.current) sendKeyRef.current(bytes, localEdit);
-                else sendInputRef.current?.(bytes);
-              }}
-            />
-            <LiveInputCapture
+            <TerminalDirectInput
               send={(bytes) => sendInputRef.current?.(bytes)}
               focusRef={captureFocusRef}
-              sendKeyRef={sendKeyRef}
+              sessionKey={terminalId}
             />
           </div>
         ) : (

@@ -17,7 +17,11 @@
 // label) and moves a server off its label once it learns the key.
 // Diagnostics stay per tunnel label.
 // Badge = sum of `unread` across servers (K2's `unreadTotal` already is
-// "unmuted unread + all waiting"). Servers never send `aps.badge`: with
+// "unmuted unread + all waiting"), plus each server's `home` (K2 0.46.16
+// `homeUnread`: the person's unread Home chat conversations, apart from the
+// Thread totals; a Voice & Chat only login's badge is Home chat's alone).
+// `home` rides Home chat alerts, format-2 nudges and clear badge pushes; a
+// push without it keeps the stored value (JS never sends it). Servers never send `aps.badge`: with
 // several servers on one phone only the phone can sum. Totals entries are
 // never expired (stale beats wrong-zero); received days are kept 30 days.
 //
@@ -38,6 +42,8 @@ enum K2BadgeStore {
     var unread: Int
     var waiting: Int
     var at: Int64
+    /// Unread Home chat conversations (K2 0.46.16); nil = never told.
+    var home: Int? = nil
   }
 
   struct Totals: Codable {
@@ -72,6 +78,8 @@ enum K2BadgeStore {
     var badgeKey: String?
     var unread: Int
     var waiting: Int?
+    /// `homeUnread` (K2 0.46.16), when the push carried it.
+    var home: Int? = nil
   }
 
   private static let lock = NSLock()
@@ -143,11 +151,11 @@ enum K2BadgeStore {
     guard let key = badgeKey ?? sub else { return nil }
     return PushTotals(
       key: key, subdomain: sub, badgeKey: badgeKey, unread: unread,
-      waiting: count(info["waitingTotal"]))
+      waiting: count(info["waitingTotal"]), home: count(info["homeUnread"]))
   }
 
   static func sum(_ totals: Totals) -> Int {
-    totals.servers.values.reduce(0) { $0 + max(0, $1.unread) }
+    totals.servers.values.reduce(0) { $0 + max(0, $1.unread) + max(0, $1.home ?? 0) }
   }
 
   static func nowMs() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded()) }
@@ -155,15 +163,16 @@ enum K2BadgeStore {
   // ── Totals ──────────────────────────────────────────────────────────
 
   /// Set one server's totals under `key` (a badgeKey or a tunnel label);
-  /// `waiting` nil keeps the stored value. Returns the new badge sum, or
-  /// nil when there is no App Group.
+  /// `waiting` / `home` nil keep the stored values. Returns the new badge
+  /// sum, or nil when there is no App Group.
   @discardableResult
-  static func set(key raw: String, unread: Int, waiting: Int?, now: Int64 = nowMs()) -> Int? {
+  static func set(key raw: String, unread: Int, waiting: Int?, home: Int? = nil, now: Int64 = nowMs()) -> Int? {
     guard let key = storeKey(raw) else { return currentSum() }
     return mutateTotals { totals in
       let prev = totals.servers[key]
       totals.servers[key] = ServerTotals(
-        unread: max(0, unread), waiting: max(0, waiting ?? prev?.waiting ?? 0), at: now)
+        unread: max(0, unread), waiting: max(0, waiting ?? prev?.waiting ?? 0), at: now,
+        home: home.map { max(0, $0) } ?? prev?.home)
     }
   }
 
@@ -250,7 +259,7 @@ enum K2BadgeStore {
   /// Group): leave the badge alone.
   static func apply(push info: [AnyHashable: Any], source: Source) -> (totals: PushTotals, sum: Int)? {
     guard let t = totals(fromPush: info) else { return nil }
-    guard let s = set(key: t.key, unread: t.unread, waiting: t.waiting) else { return nil }
+    guard let s = set(key: t.key, unread: t.unread, waiting: t.waiting, home: t.home) else { return nil }
     if let sub = t.subdomain { recordReceived(subdomain: sub, source: source) }
     return (t, s)
   }

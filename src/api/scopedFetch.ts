@@ -60,6 +60,7 @@ const USER_ROUTES = new Set([
   "/cli/project-group/msg",
   "/cli/vault/confirm/start",
   "/cli/vault/confirm/finish",
+  "/cli/compute/git-access/setup",
   "/cli/terminal/write",
   "/cli/feedback/comment",
   "/cli/fs/read-file",

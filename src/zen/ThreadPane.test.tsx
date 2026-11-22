@@ -1114,7 +1114,7 @@ describe("ThreadPane", () => {
     expect(screen.getByTestId("attach-chip").textContent).toMatch(/shot.png/);
   });
 
-  function openAppa(sendThread: () => Promise<boolean>) {
+  function openAspen(sendThread: () => Promise<boolean>) {
     useZenStore.setState({
       agentId: "aspen",
       agents: [
@@ -1153,7 +1153,7 @@ describe("ThreadPane", () => {
       data: { path: "/Users/Bob/Aspen/.k2/downloads/shot.png" },
     });
     const sendThread = vi.fn(async () => true);
-    openAppa(sendThread);
+    openAspen(sendThread);
     render(<ThreadPane />);
     pasteAndSend(new File(["x"], "shot.png", { type: "image/png" }), "see this");
     await waitFor(() => expect(uploadFsBinary).toHaveBeenCalled());
@@ -1181,7 +1181,7 @@ describe("ThreadPane", () => {
         data: { path: "/Users/Bob/Aspen/.k2/downloads/shot (1).png" },
       });
       const sendThread = vi.fn(async () => true);
-      openAppa(sendThread);
+      openAspen(sendThread);
       render(<ThreadPane />);
       pasteAndSend(new File(["x"], "shot.png", { type: "image/png" }));
       await waitFor(() =>
@@ -1205,7 +1205,7 @@ describe("ThreadPane", () => {
       data: { path: "/Users/Bob/Aspen/.k2/downloads/shot.png" },
     });
     const sendThread = vi.fn(async () => true);
-    openAppa(sendThread);
+    openAspen(sendThread);
     render(<ThreadPane />);
     pasteAndSend(new File(["x"], "shot.png", { type: "image/png" }));
     await waitFor(() => expect(sendThread).toHaveBeenCalled());
@@ -1220,7 +1220,7 @@ describe("ThreadPane", () => {
       data: { path: "/Users/Bob/Aspen/.k2/downloads/shot (1).png" },
     });
     const sendThread = vi.fn(async () => true);
-    openAppa(sendThread);
+    openAspen(sendThread);
     render(<ThreadPane />);
     pasteAndSend(new File(["x"], "shot.png", { type: "image/png" }));
     await waitFor(() =>

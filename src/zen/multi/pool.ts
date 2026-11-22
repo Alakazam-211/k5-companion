@@ -365,8 +365,10 @@ export interface Pool {
   readonly store: StoreApi<{ entries: Record<string, PoolEntry> }>;
   entry(serverId: string): PoolEntry | undefined;
   /** The status check. `bootOnly` skips the login half (the active
-   *  server, which keeps today's paths). Never throws. Single-flight. */
-  check(serverId: string, opts?: { bootOnly?: boolean }): Promise<PoolEntry | undefined>;
+   *  server, which keeps today's paths). Never throws. Single-flight;
+   *  `fresh` (K2 0.46.17 `access_changed`): a check already running read
+   *  whoami before the change, so one more full check follows it. */
+  check(serverId: string, opts?: { bootOnly?: boolean; fresh?: boolean }): Promise<PoolEntry | undefined>;
   /** Record when the loop checks next (the "retrying in N s" copy). */
   schedule(serverId: string, nextAt: number | null): void;
   /** A sessions/events socket for this server closed 4001 (MA14). */
@@ -483,20 +485,23 @@ export function createPool(deps: PoolDeps): Pool {
     });
   };
 
+  const check = (id: string, opts?: { bootOnly?: boolean; fresh?: boolean }): Promise<PoolEntry | undefined> => {
+    const running = inflight.get(id);
+    if (running && opts?.fresh) return running.then(() => check(id, { bootOnly: opts.bootOnly }));
+    if (running) return running;
+    const p = doCheck(id, opts?.bootOnly === true)
+      .catch(() => store.getState().entries[id])
+      .finally(() => {
+        if (inflight.get(id) === p) inflight.delete(id);
+      });
+    inflight.set(id, p);
+    return p;
+  };
+
   return {
     store,
     entry: (id) => store.getState().entries[id],
-    check(id, opts) {
-      const running = inflight.get(id);
-      if (running) return running;
-      const p = doCheck(id, opts?.bootOnly === true)
-        .catch(() => store.getState().entries[id])
-        .finally(() => {
-          if (inflight.get(id) === p) inflight.delete(id);
-        });
-      inflight.set(id, p);
-      return p;
-    },
+    check,
     schedule(id, nextAt) {
       const e = store.getState().entries[id];
       if (e) write(id, reducePool(e, { type: "scheduled", nextAt }));
@@ -534,6 +539,8 @@ export const pool: Pool = createPool({
 onServerForget((id) => pool.forget(id));
 
 // MA14: what the sockets learn reaches the pool (rows + room banner).
+// K2 0.46.17 `access_changed` re-reads whoami there (role, Voice & Chat
+// only, a forced password change) in zen/accessLive.ts.
 onServerSignal((id, signal) => {
   if (signal === "kicked") pool.noteKicked(id);
   else if (signal === "signin") pool.noteSigninRequired(id);

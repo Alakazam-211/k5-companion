@@ -12,7 +12,7 @@ import {
   fitComposerField,
   settledHeight,
 } from "./GlassComposer";
-import { FLY_MS, SEND_FLY_DEBUG_KEY } from "./sendFly";
+import { FLY_MS, SEND_FLY_DEBUG_KEY } from "../kit/mobileChat/sendFly";
 
 afterEach(() => {
   cleanup();

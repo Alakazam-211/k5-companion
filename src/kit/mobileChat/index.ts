@@ -1,5 +1,5 @@
-// Mobile chat kit — keyboard / composer behaviour for a chat screen in a
-// WKWebView (Tauri iOS), extracted from K2's Thread. See
+// Mobile chat kit — keyboard / composer behaviour and the send motion for
+// a chat screen in a WKWebView (Tauri iOS), extracted from K2's Thread. See
 // docs/mobile-chat-kit.md for the whys.
 //
 // Viewport store (the keyboard as a published height + motion):
@@ -30,6 +30,13 @@ export { useKeyboardForwardPlay } from "./useKeyboardForwardPlay";
 export { useTapToDismiss, isDismissTap, NO_DISMISS_SELECTOR } from "./useTapToDismiss";
 // Interactive dismiss internals (stand-in, samples, correction):
 export * from "./keyboardDragDock";
+// Send motion (an iMessage-style send; CSS in ./sendFly.css, import it
+// once on the screen): the fly from the field into the bubble, the list's
+// one-owner glide (sends, arrivals, a drawer), and the pending bubble's
+// breathe → delivered brighten.
+export * from "./sendFly";
+export * from "./listGlide";
+export * from "./useDeliverBrighten";
 // Diagnostics: recorder + score (trace format v1).
 export {
   initKbDragRecorder,

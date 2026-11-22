@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import {
   applyTheme,
+  darkPaletteFor,
   nativeLook,
   PALETTES,
   readAccent,
@@ -32,19 +33,38 @@ type ThemeState = ThemeSelection & {
   setAccent: (id: PaletteId, choice: AccentChoice | null) => void;
   /** The system's appearance changed (Auto). */
   refresh: () => void;
+  /** Screens open that keep the app dark (the terminal); while any is,
+   *  the dark palette (darkPaletteFor) is stamped instead of `shown`. */
+  darkHolds: number;
+  /** Keep the app dark until the returned release is called. */
+  holdDark: () => () => void;
 };
+
+/** The palette actually stamped: `shown`, or its dark stand-in while a
+ *  screen holds the app dark. */
+function stamped(sel: ThemeSelection, shown: PaletteId, holds: number): PaletteId {
+  return holds > 0 ? darkPaletteFor(sel, shown) : shown;
+}
+
+/** Stamp the page and tell native, for a selection and its palette. */
+function stamp(sel: ThemeSelection, shown: PaletteId, holds: number, systemLight: boolean): void {
+  const id = stamped(sel, shown, holds);
+  applyTheme(id, readAccent(id));
+  // Held dark, native shows that palette on both sides, so the keyboard,
+  // status bar and sheets stay dark with the page.
+  syncNativeAppearance(nativeLook(holds > 0 ? { ...sel, dark: id, light: id } : sel, systemLight));
+}
 
 function readAccents(): Record<PaletteId, AccentChoice | null> {
   return Object.fromEntries(PALETTES.map((p) => [p.id, readAccent(p.id)])) as Record<PaletteId, AccentChoice | null>;
 }
 
 /** Persist a selection, stamp what it shows, and return the state to set. */
-function commit(sel: ThemeSelection): Pick<ThemeState, "mode" | "dark" | "light" | "shown"> {
+function commit(sel: ThemeSelection, holds: number): Pick<ThemeState, "mode" | "dark" | "light" | "shown"> {
   const light = systemPrefersLight();
   writeSelection(sel, light);
   const shown = resolvePalette(sel, light);
-  applyTheme(shown, readAccent(shown));
-  syncNativeAppearance(nativeLook(sel, light));
+  stamp(sel, shown, holds, light);
   return { mode: sel.mode, dark: sel.dark, light: sel.light, shown };
 }
 
@@ -54,32 +74,56 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
   ...initial,
   shown: resolvePalette(initial),
   accents: readAccents(),
+  darkHolds: 0,
   setMode: (mode) => {
-    const { dark, light } = get();
-    set(commit({ mode, dark, light }));
+    const { dark, light, darkHolds } = get();
+    set(commit({ mode, dark, light }, darkHolds));
   },
   pickPalette: (side, id) => {
-    const { mode, dark, light } = get();
-    set(commit(selectPalette({ mode, dark, light }, side, id)));
+    const { mode, dark, light, darkHolds } = get();
+    set(commit(selectPalette({ mode, dark, light }, side, id), darkHolds));
   },
   setAccent: (id, choice) => {
     writeAccent(id, choice);
     const accents = { ...get().accents, [id]: readAccent(id) };
-    const { shown } = get();
-    if (id === shown) applyTheme(shown, accents[id]);
+    const { mode, dark, light, shown, darkHolds } = get();
+    if (id === stamped({ mode, dark, light }, shown, darkHolds)) applyTheme(id, accents[id]);
     set({ accents });
   },
   refresh: () => {
-    const { mode, dark, light, shown } = get();
+    const { mode, dark, light, shown, darkHolds } = get();
+    const sel = { mode, dark, light };
     const systemLight = systemPrefersLight();
-    const next = resolvePalette({ mode, dark, light }, systemLight);
+    const next = resolvePalette(sel, systemLight);
     // Native under Auto has already restyled for the iPhone; this moves
     // the colour behind the page with it (deduped: nothing changed,
     // nothing sent).
-    syncNativeAppearance(nativeLook({ mode, dark, light }, systemLight));
+    const held = darkHolds > 0 ? { ...sel, dark: darkPaletteFor(sel, next), light: darkPaletteFor(sel, next) } : sel;
+    syncNativeAppearance(nativeLook(held, systemLight));
     if (next === shown) return;
-    applyTheme(next, readAccent(next));
+    const id = stamped(sel, next, darkHolds);
+    applyTheme(id, readAccent(id));
     set({ shown: next });
+  },
+  holdDark: () => {
+    const change = (by: number) => {
+      const { mode, dark, light, shown, darkHolds } = get();
+      const holds = Math.max(0, darkHolds + by);
+      const sel = { mode, dark, light };
+      // Only a change of what's stamped restamps (a second hold, or a
+      // dark palette already on screen, changes nothing on the page).
+      if (stamped(sel, shown, holds) !== stamped(sel, shown, darkHolds) || (holds > 0) !== (darkHolds > 0)) {
+        stamp(sel, shown, holds, systemPrefersLight());
+      }
+      set({ darkHolds: holds });
+    };
+    change(1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      change(-1);
+    };
   },
 }));
 

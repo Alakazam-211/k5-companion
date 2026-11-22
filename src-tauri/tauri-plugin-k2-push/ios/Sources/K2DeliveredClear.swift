@@ -20,6 +20,14 @@
 // it goes only when the server has nothing unread left. A permission card's
 // alert (`permission` "1") survives a read of its chat, as the app's summary
 // keeps a chat with a card waiting: reading never answers a card.
+//
+// Home chat (K2 0.46.16 `home-chat-push-v1`, kind `home_chat`): a chat is
+// its `conversationId`, the "seq" its `messageId` (a Sew id: a decimal that
+// fits i64, so Int, 64-bit on every iOS device, keeps it exactly; the JS
+// mirror is src/lib/homeChatPush.ts). Cleared by a read hint `h:<conv>:<id>`
+// (at or below the id), by the app reading the chat here (`read`, kind
+// `home`), and all of them once the server's `homeUnread` reaches 0
+// (`clearHome`). The Thread totals reaching 0 (`keepOnly`) never touch them.
 
 import Foundation
 import UserNotifications
@@ -32,7 +40,7 @@ enum K2DeliveredClear {
   }
 
   struct Chat: Equatable {
-    /// "thread" or "project".
+    /// "thread", "project" or "home" (Home chat).
     var kind: String
     var id: String
     /// Read up to here; nil = all of it.
@@ -45,6 +53,9 @@ enum K2DeliveredClear {
     /// Only these chats still have something unread, above their seq:
     /// every other Thread / project notification from the server goes.
     case keepOnly([Chat])
+    /// The server's Home chat count reached 0: every Home chat
+    /// notification from it delivered before the state goes.
+    case clearHome
   }
 
   /// One delivered notification, as the matcher sees it.
@@ -83,6 +94,8 @@ enum K2DeliveredClear {
     switch str(info["kind"]) {
     case "thread": return ("thread", str(info["conversationId"]), seq)
     case "project": return ("project", str(info["groupId"]), seq)
+    // The generic lane names no conversation (nil id): only `clearHome`.
+    case "home_chat": return ("home", str(info["conversationId"]), str(info["messageId"]).flatMap { Int($0) })
     default: return nil
     }
   }
@@ -104,12 +117,16 @@ enum K2DeliveredClear {
         guard let id = chat.id, let hit = chats.first(where: { $0.kind == chat.kind && $0.id == id }) else { return nil }
         return covered(noteSeq: chat.seq, date: n.date, readSeq: hit.seq, before: before) ? n.id : nil
       case .keepOnly(let unread):
+        // Home chat follows its own count (`clearHome`), not these totals.
+        guard chat.kind != "home" else { return nil }
         // Newer than the state: not ours to judge.
         guard n.date <= before else { return nil }
         guard let id = chat.id else { return unread.isEmpty ? n.id : nil }
         guard let left = unread.first(where: { $0.kind == chat.kind && $0.id == id }) else { return n.id }
         guard let readSeq = left.seq, let noteSeq = chat.seq else { return nil }
         return noteSeq <= readSeq ? n.id : nil
+      case .clearHome:
+        return chat.kind == "home" && n.date <= before ? n.id : nil
       }
     }
   }
@@ -117,14 +134,18 @@ enum K2DeliveredClear {
   /// What a silent badge push clears. Read hints first: they go by seq, so
   /// they reach an alert too new for the totals' time margin (read within
   /// seconds of the alert, and K2 won't hint that read again).
-  static func silentOps(unread: Int, waiting: Int?, hints: [Chat]) -> [Op] {
+  static func silentOps(unread: Int, waiting: Int?, hints: [Chat], homeUnread: Int? = nil) -> [Op] {
     var ops: [Op] = hints.isEmpty ? [] : [.read(hints)]
     if unread == 0 && (waiting ?? 0) == 0 { ops.append(.keepOnly([])) }
+    // K2 0.46.16: only a stated 0 clears every Home chat notification (no
+    // `homeUnread` = not known: leave them).
+    if homeUnread == 0 { ops.append(.clearHome) }
     return ops
   }
 
-  /// `"t:<conversationId>:<seq>,p:<groupId>:<seq>"` (K2 0.46.8
-  /// `push-read-hints-v1`): kind before the first ':', seq after the last.
+  /// `"t:<conversationId>:<seq>,p:<groupId>:<seq>,h:<conversationId>:<message
+  /// id>"` (K2 0.46.8 `push-read-hints-v1`; `h:` K2 0.46.16 Home chat): kind
+  /// before the first ':', seq after the last.
   static func parseReadHints(_ raw: Any?) -> [Chat] {
     guard let s = raw as? String else { return [] }
     return s.split(separator: ",").compactMap { part in
@@ -134,6 +155,7 @@ enum K2DeliveredClear {
       switch p[..<first] {
       case "t": kind = "thread"
       case "p": kind = "project"
+      case "h": kind = "home"
       default: return nil
       }
       let id = String(p[p.index(after: first)..<last])

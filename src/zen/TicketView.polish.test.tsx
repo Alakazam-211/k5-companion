@@ -4,7 +4,7 @@
 // optimistic comment that flies in and only brightens on delivery, the
 // "New comment ↓" pill and a draft per ticket.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SENDING_OPACITY } from "./useDeliverBrighten";
+import { SENDING_OPACITY } from "../kit/mobileChat/useDeliverBrighten";
 import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("../api/client", () => ({
@@ -285,6 +285,10 @@ describe("Optimistic comment", () => {
     expect(row.getAttribute("data-outgoing")).toBe("sending");
     expect(bubbleOf(row).style.opacity).toBe(String(SENDING_OPACITY));
     expect(bubbleOf(row).style.transition).toBe("");
+    // Its words take the bubble's on-accent ink in every palette (Veil showed
+    // black on blue): the shared bubble rule needs this marker.
+    expect(bubbleOf(row).hasAttribute("data-bubble-body")).toBe(true);
+    expect(bubbleOf(row).style.color).toBe("var(--color-on-accent)");
     expect(statusOf(row).textContent).toBe("Sending…");
     // Typing stays open while it sends; a second send waits.
     type("again");

@@ -2,8 +2,9 @@
 // The Home chat view: the Thread's look on the Home chat routes. Names over
 // runs, the typing line, reactions from the hold menu (quick emoji on top)
 // and chips, Reply (chip, replyTo, quote strip and its jump), the call
-// record line's Call back hook, read acks and view, and the channel's
-// members sheet with Delete's "Keep it".
+// record line's Call back hook, read acks and view, the channel's
+// members sheet with Delete's "Keep it", and the Thread's send motion
+// (the mobile chat kit's fly, fade, breathe and brighten).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { HomeChatMessage } from "../../api/homeChatPure";
@@ -109,6 +110,13 @@ describe("the DM", () => {
     // On screen: view open, ack the newest.
     expect(api.viewHomeChat).toHaveBeenCalledWith(expect.anything(), "9", true);
     expect(api.ackHomeChat).toHaveBeenCalledWith(expect.anything(), "9");
+  });
+
+  it("never draws sender pictures, nor the column", () => {
+    seed([msg("10", ANA, "hi"), msg("11", ANA, "there"), msg("12", ME, "hello"), msg("13", ANA, "again")]);
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    expect(screen.queryAllByTestId("home-chat-msg-picture")).toHaveLength(0);
+    expect(document.querySelectorAll("[data-sender-column]")).toHaveLength(0);
   });
 
   it("shows who is typing on the composer's edge", () => {
@@ -284,6 +292,54 @@ describe("the channel", () => {
     expect(screen.getByTestId("home-chat-title").textContent).toBe("#design");
   });
 
+  it("sender pictures: beside the last bubble of each run of someone else's, in the bubble's box", () => {
+    seed([
+      msg("10", ANA, "a", { reactions: [{ emoji: "🎉", count: 1, me: false }] }),
+      msg("11", ANA, "b", { reactions: [{ emoji: "🎉", count: 1, me: false }] }),
+      msg("12", BEN, "c"),
+      msg("13", ME, "mine"),
+    ]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    const rows = screen.getAllByTestId("home-chat-msg");
+    const pic = (row: HTMLElement) => row.querySelector('[data-testid="home-chat-msg-picture"]');
+    expect(rows.map((r) => !!pic(r))).toEqual([false, true, true, false]);
+    // Every bubble of someone else's sits past the column; yours never.
+    expect(rows.map((r) => r.getAttribute("data-sender-column"))).toEqual(["on", "on", "on", null]);
+    expect(rows[3].style.marginLeft).toBe("");
+    // Against the bubble (its box), so the chips under it never push it down.
+    const box = pic(rows[1])!.parentElement!;
+    expect(box.hasAttribute("data-home-chat-bubble-box")).toBe(true);
+    expect(box.querySelector('[data-testid="home-chat-bubble"]')).toBeTruthy();
+    expect(box.querySelector('[data-testid="home-chat-reaction"]')).toBeNull();
+    expect(pic(rows[1])!.querySelector('[data-person-avatar="initials"]')?.textContent).toBe("AD");
+  });
+
+  it("a new message from the same sender moves the picture down to it", () => {
+    seed([msg("10", ANA, "a"), msg("11", ANA, "b")]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    const where = () => screen.getAllByTestId("home-chat-msg").map((r) => !!r.querySelector('[data-testid="home-chat-msg-picture"]'));
+    expect(where()).toEqual([false, true]);
+    act(() => {
+      useHomeChatStore.getState().patchConv(KEY, { messages: [msg("10", ANA, "a"), msg("11", ANA, "b"), msg("12", ANA, "c")], hasMore: false, loaded: true });
+    });
+    expect(where()).toEqual([false, false, true]);
+  });
+
+  it("a deleted message ends the run and draws no picture", () => {
+    seed([msg("10", ANA, "a"), msg("11", ANA, "", { deleted: true })]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    expect(screen.getByTestId("home-chat-msg").querySelector('[data-testid="home-chat-msg-picture"]')).toBeTruthy();
+    expect(screen.getByTestId("home-chat-msg-deleted").querySelector('[data-testid="home-chat-msg-picture"]')).toBeNull();
+  });
+
+  it("the hold menu lifts the bubble without its sender's picture", () => {
+    seed([msg("10", ANA, "a")]);
+    render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
+    fireEvent.contextMenu(screen.getByTestId("home-chat-bubble"));
+    expect(screen.getAllByTestId("home-chat-msg-picture")).toHaveLength(1);
+    expect(document.querySelectorAll("[data-thread-picture]")).toHaveLength(1);
+  });
+
   it("the header opens the members sheet; Delete asks with Keep it focused", async () => {
     seed([msg("10", ANA, "a")]);
     useHomeChatStore.getState().setChannel(KEY, members);
@@ -384,21 +440,19 @@ describe("K2 Design's review (4.3.0)", () => {
     expect(save.mock.calls[1][0]).toMatchObject({ text: "for the room", source: { agent: "9", agent_name: "#design" } });
   });
 
-  it("the floating header fades text under it once the list has scrolled", () => {
+  it("the floating header has the agent chats' blur and tint (Zen.tsx), not a solid fade", () => {
     seed([msg("10", ANA, "a"), msg("11", ANA, "b")]);
     render(<HomeChatView target={CHANNEL} onBack={() => {}} />);
     const blur = screen.getByTestId("home-chat-header-blur");
-    expect(blur.className).toContain("zen-header-blur--edge");
-    // The fade starts 24px below the pill (12px header padding + 12px).
-    expect(blur.style.getPropertyValue("--zen-edge-fade")).toBe("12px");
-    expect(blur.getAttribute("data-scrolled")).not.toBe("1");
+    expect(blur.className).toBe("zen-header-blur");
+    expect([...blur.children].map((c) => c.className)).toEqual([
+      "zen-header-blur-1",
+      "zen-header-blur-2",
+      "zen-header-blur-3",
+      "zen-header-blur-4",
+      "zen-header-tint",
+    ]);
     const scroller = screen.getByTestId("home-chat-scroller");
-    scroller.scrollTop = 120;
-    fireEvent.scroll(scroller);
-    expect(blur.getAttribute("data-scrolled")).toBe("1");
-    scroller.scrollTop = 0;
-    fireEvent.scroll(scroller);
-    expect(blur.getAttribute("data-scrolled")).toBe("0");
     // The first message starts below the header (and its air).
     expect(scroller.style.paddingTop).toContain("env(safe-area-inset-top)");
   });
@@ -408,5 +462,172 @@ describe("K2 Design's review (4.3.0)", () => {
     seed([]);
     render(<HomeChatView target={DM} onBack={() => {}} />);
     expect(screen.getByTestId("home-chat-off").textContent).toBe("Chat isn’t available on Studio. It needs a Linux server.");
+  });
+});
+
+describe("the send motion (the Thread's, from the mobile chat kit)", () => {
+  type FakeAnim = { onfinish: (() => void) | null; oncancel: (() => void) | null; cancel: () => void };
+  const field = () => screen.getByTestId("home-chat-composer-input") as HTMLTextAreaElement;
+  const bubbles = () => screen.getAllByTestId("home-chat-bubble");
+  function sendText(text: string) {
+    fireEvent.change(field(), { target: { value: text } });
+    fireEvent.submit(screen.getByTestId("home-chat-composer-form"));
+  }
+  function stubGeometry() {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const id = this.getAttribute("data-testid");
+      const r =
+        id === "home-chat-composer-input"
+          ? { left: 20, top: 700, width: 300, height: 24 }
+          : id === "home-chat-composer-field"
+            ? { left: 12, top: 692, width: 366, height: 40 }
+            : id === "home-chat-bubble"
+              ? { left: 200, top: 500, width: 80, height: 36 }
+              : { left: 0, top: 0, width: 390, height: 844 };
+      return { ...r, right: r.left + r.width, bottom: r.top + r.height, x: r.left, y: r.top, toJSON: () => r };
+    });
+  }
+  function stubAnimate() {
+    const anims: FakeAnim[] = [];
+    const animate = vi.fn(() => {
+      const a: FakeAnim = { onfinish: null, oncancel: null, cancel: vi.fn() };
+      anims.push(a);
+      return a;
+    });
+    Element.prototype.animate = animate as never;
+    return { anims, animate };
+  }
+  function reduceMotion() {
+    window.matchMedia = vi.fn((q: string) => ({
+      matches: q.includes("reduce"),
+      media: q,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    })) as never;
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    // @ts-expect-error test cleanup
+    delete Element.prototype.animate;
+    // @ts-expect-error test cleanup
+    delete window.matchMedia;
+  });
+
+  it("a send flies from the field into its bubble, hidden until it lands, then breathes until delivered", async () => {
+    stubGeometry();
+    vi.stubGlobal("CSS", { supports: () => true });
+    const { anims, animate } = stubAnimate();
+    seed([msg("10", ANA, "hi")]);
+    let answer!: (v: unknown) => void;
+    api.sendHomeChatMessage.mockReturnValue(new Promise((ok) => (answer = ok)));
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    sendText("ping");
+    // Same commit: the field is empty and the clone flies.
+    expect(field().value).toBe("");
+    const clone = screen.getByTestId("send-fly-clone");
+    // The source is the field: its words, as the field drew them.
+    expect(clone.querySelector('[data-fly-part="ghost"]')?.textContent).toBe("ping");
+    const calls = animate.mock.calls as unknown as [Keyframe[], KeyframeAnimationOptions][];
+    const ctx = animate.mock.contexts as unknown as Element[];
+    const flyIdx = ctx.indexOf(clone);
+    expect(flyIdx).toBeGreaterThanOrEqual(0);
+    const frames = calls[flyIdx][0];
+    expect(frames[0].transform).not.toBe("translate3d(0px, 0px, 0px) scale(1)");
+    expect(frames[frames.length - 1].transform).toBe("translate3d(0px, 0px, 0px) scale(1)");
+    // The blue shape lands on the bubble, its tail riding along (a solo
+    // send is the last of its run).
+    const shape = screen.getByTestId("send-fly-shape");
+    expect(shape.querySelector('[data-fly-part="tail"]')).not.toBeNull();
+    // Above the dock (z 2), under the header (z 10).
+    expect(Number(clone.style.zIndex)).toBeGreaterThan(Number(screen.getByTestId("home-chat-dock").style.zIndex));
+    expect(Number(clone.style.zIndex)).toBeLessThan(10);
+    // In flight: only the new bubble is the target, laid out but hidden.
+    const target = document.querySelector<HTMLElement>('[data-fly-target="true"]')!;
+    expect(target.textContent).toContain("ping");
+    expect(target.style.visibility).toBe("hidden");
+    expect(target.className).not.toContain("zen-bubble-breathe");
+    expect(bubbles()[0].style.visibility).toBe("");
+    act(() => anims[flyIdx].onfinish?.());
+    expect(screen.queryByTestId("send-fly-clone")).toBeNull();
+    expect(screen.queryByTestId("send-fly-shape")).toBeNull();
+    const landed = bubbles()[1];
+    expect(landed.style.visibility).toBe("");
+    expect(landed.getAttribute("data-fly-target")).toBeNull();
+    // Sending…: the breathe; delivered: gone (and it brightens).
+    expect(landed.className).toContain("zen-bubble-breathe");
+    await act(async () => {
+      answer({ ok: true, message: msg("12", ME, "ping", { nonce: api.sendHomeChatMessage.mock.calls[0][1].nonce }) });
+    });
+    await waitFor(() => expect(bubbles()[1].className).not.toContain("zen-bubble-breathe"));
+    // The same element from Send to delivered.
+    expect(bubbles()[1]).toBe(landed);
+    expect(landed.style.opacity).toBe("1");
+  });
+
+  it("reduced motion: no flight, the bubble just fades in", () => {
+    stubGeometry();
+    stubAnimate();
+    reduceMotion();
+    seed([msg("10", ANA, "hi")]);
+    api.sendHomeChatMessage.mockReturnValue(new Promise(() => {}));
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    sendText("ping");
+    expect(screen.queryByTestId("send-fly-clone")).toBeNull();
+    expect(screen.queryByTestId("send-fly-shape")).toBeNull();
+    const sent = bubbles()[1];
+    expect(sent.textContent).toContain("ping");
+    expect(sent.style.visibility).toBe("");
+    expect(sent.className).toContain("zen-bubble-fade");
+  });
+
+  it("no Web Animations: the same fade", () => {
+    stubGeometry();
+    seed([msg("10", ANA, "hi")]);
+    api.sendHomeChatMessage.mockReturnValue(new Promise(() => {}));
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    sendText("ping");
+    expect(screen.queryByTestId("send-fly-clone")).toBeNull();
+    expect(bubbles()[1].className).toContain("zen-bubble-fade");
+  });
+
+  it("an incoming message, or yours from another device, never flies", () => {
+    stubGeometry();
+    vi.stubGlobal("CSS", { supports: () => true });
+    stubAnimate();
+    seed([msg("10", ANA, "hi")]);
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    act(() => {
+      useHomeChatStore.getState().mergeMessages(KEY, [msg("11", ANA, "you there?")]);
+    });
+    act(() => {
+      useHomeChatStore.getState().mergeMessages(KEY, [msg("12", ME, "from my laptop", { nonce: "laptop-1" })]);
+    });
+    expect(bubbles()).toHaveLength(3);
+    expect(screen.queryByTestId("send-fly-clone")).toBeNull();
+    expect(document.querySelector("[data-fly-target]")).toBeNull();
+    for (const b of bubbles()) {
+      expect(b.style.visibility).toBe("");
+      expect(b.className).not.toContain("zen-bubble-fade");
+    }
+  });
+
+  it("the same words as a Not sent bubble go again in place: no second flight", async () => {
+    stubGeometry();
+    vi.stubGlobal("CSS", { supports: () => true });
+    const { anims, animate } = stubAnimate();
+    seed([msg("10", ANA, "hi")]);
+    api.sendHomeChatMessage.mockResolvedValueOnce({ ok: false, kind: "server", code: "sew_error", hint: "Sew is down", status: 502 });
+    render(<HomeChatView target={DM} onBack={() => {}} />);
+    sendText("ping");
+    const flyIdx = (animate.mock.contexts as unknown as Element[]).indexOf(screen.getByTestId("send-fly-clone"));
+    act(() => anims[flyIdx].onfinish?.());
+    await screen.findByTestId("home-chat-retry");
+    api.sendHomeChatMessage.mockReturnValue(new Promise(() => {}));
+    sendText("ping");
+    expect(screen.queryByTestId("send-fly-clone")).toBeNull();
+    expect(bubbles()).toHaveLength(2);
+    expect(bubbles()[1].style.visibility).toBe("");
   });
 });

@@ -1490,7 +1490,7 @@ checksum = "521e380c0c8afb8d9a1e83a1822ee03556fc3e3e7dbc1fd30be14e37f9cb3f89"
 dependencies = [
  "bit-set",
  "cssparser",
- "foldhash 0.2.0",
+ "foldhash",
  "html5ever",
  "precomputed-hash",
  "selectors",
@@ -1786,12 +1786,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
-name = "fixedbitset"
-version = "0.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
-
-[[package]]
 name = "flagset"
 version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1812,12 +1806,6 @@ name = "fnv"
 version = "1.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1"
-
-[[package]]
-name = "foldhash"
-version = "0.1.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2"
 
 [[package]]
 name = "foldhash"
@@ -2328,15 +2316,6 @@ name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
-
-[[package]]
-name = "hashbrown"
-version = "0.15.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9229cfe53dfd69f0609a49f65461bd93001ea1ef889cd5529dd176593f5338a1"
-dependencies = [
- "foldhash 0.1.5",
-]
 
 [[package]]
 name = "hashbrown"
@@ -2931,9 +2910,10 @@ dependencies = [
 
 [[package]]
 name = "k2so-companion"
-version = "4.3.0"
+version = "4.3.1"
 dependencies = [
  "base64 0.22.1",
+ "futures-util",
  "objc2",
  "reqwest 0.12.28",
  "serde",
@@ -2946,20 +2926,23 @@ dependencies = [
  "tauri-plugin-k2-push",
  "tauri-plugin-sew-voice",
  "tauri-plugin-store",
+ "tokio",
+ "tokio-tungstenite",
  "url",
 ]
 
 [[package]]
 name = "kessel-audio"
-version = "0.2.1"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5ba77f16e4ff11d62b74ef4d1047a6a1d48afe60aad3a422e3ca57301765cf2"
+checksum = "b526692a5dd5090e968daf2bea349927e33b28ab89ffdd077c0e4f6bf114d8c1"
 dependencies = [
  "block2",
  "bytes",
  "coreaudio-rs",
  "cpal",
  "crossbeam-queue",
+ "libc",
  "ndk",
  "objc2",
  "objc2-audio-toolbox",
@@ -3199,12 +3182,6 @@ dependencies = [
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
 ]
-
-[[package]]
-name = "multimap"
-version = "0.10.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1d87ecb2933e8aeadb3e3a02b828fed80a7528047e68b4f424523a0981a3a084"
 
 [[package]]
 name = "native-tls"
@@ -3850,33 +3827,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pbjson-build"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2ed4d5c6ae95e08ac768883c8401cf0e8deb4e6e1d6a4e1fd3d2ec4f0ec63200"
-dependencies = [
- "heck 0.5.0",
- "itertools",
- "prost",
- "prost-types",
-]
-
-[[package]]
-name = "pbjson-types"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a14e2757d877c0f607a82ce1b8560e224370f159d66c5d52eb55ea187ef0350e"
-dependencies = [
- "bytes",
- "chrono",
- "pbjson",
- "pbjson-build",
- "prost",
- "prost-build",
- "serde",
-]
-
-[[package]]
 name = "pem-rfc7468"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3890,17 +3840,6 @@ name = "percent-encoding"
 version = "2.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
-
-[[package]]
-name = "petgraph"
-version = "0.8.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8701b58ea97060d5e5b155d383a69952a60943f0e6dfe30b04c287beb0b27455"
-dependencies = [
- "fixedbitset",
- "hashbrown 0.15.5",
- "indexmap 2.13.1",
-]
 
 [[package]]
 name = "phf"
@@ -4126,16 +4065,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "925383efa346730478fb4838dbe9137d2a47675ad789c546d150a6e1dd4ab31c"
 
 [[package]]
-name = "prettyplease"
-version = "0.2.37"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
-dependencies = [
- "proc-macro2",
- "syn 2.0.117",
-]
-
-[[package]]
 name = "primal-check"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4244,25 +4173,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prost-build"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03da047801ff44bb6a4d407d4860c05fd70bb81714e6b2f3812603d5b145b042"
-dependencies = [
- "heck 0.5.0",
- "itertools",
- "log",
- "multimap",
- "petgraph",
- "prettyplease",
- "prost",
- "prost-types",
- "regex",
- "syn 2.0.117",
- "tempfile",
-]
-
-[[package]]
 name = "prost-derive"
 version = "0.14.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4273,15 +4183,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "prost-types"
-version = "0.14.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f94967dc7688f3054c7fac87473ffae4cc4c3904800e2d9f5b857246d8963b0a"
-dependencies = [
- "prost",
 ]
 
 [[package]]
@@ -4912,7 +4813,6 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
 dependencies = [
- "chrono",
  "dyn-clone",
  "ref-cast",
  "schemars_derive 1.2.1",
@@ -5222,9 +5122,9 @@ dependencies = [
 
 [[package]]
 name = "sew-call-client"
-version = "0.8.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c23e1de4f71c88d008931f1834c488719cb0620ce078475847993efb308760a"
+checksum = "2b61273d739eaf7e653e39bb5d162527d6e9bfca14d915be20a5835928820b2f"
 dependencies = [
  "aes 0.8.4",
  "aes-gcm 0.10.3",
@@ -5266,9 +5166,9 @@ dependencies = [
 
 [[package]]
 name = "sew-e2ee"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0d0493c89ac9c8fdb00e3d5303c6b346873bf56f1c249008b7c2fff67aad37c"
+checksum = "e729c1b9353adb80225edbb8233bd6c4c298f327d6357751fd6590b36899f558"
 dependencies = [
  "aes-gcm 0.10.3",
  "ed25519-dalek",
@@ -5293,9 +5193,9 @@ dependencies = [
 
 [[package]]
 name = "sew-lk-compat"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e7d68e1f0930a960f9ebf8a9b04b563ab4837e350ef4c87e7911439648ba032"
+checksum = "a1edf31d205aa1d8b96e940fd1e4051c5a91462cb14b6c896bcfd3b22fd118e5"
 dependencies = [
  "aes-gcm 0.10.3",
  "aws-lc-rs",
@@ -5315,21 +5215,20 @@ dependencies = [
 
 [[package]]
 name = "sew-lkproto"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f38eb0a21c853d184bdcbf6544fbd5763f790d714efa0e95efdf6c7234a63b40"
+checksum = "b55c5569275250e32be31bc7f9cdfbc0cbcec4fdc150aec40638ea40e33858fa"
 dependencies = [
  "pbjson",
- "pbjson-types",
  "prost",
  "serde",
 ]
 
 [[package]]
 name = "sew-mls-crypto"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eeecea662b17626bdd7f300856a8b394f6ce3ba65de4dce454231b2a9611de29"
+checksum = "f06dc6cf41fd477eeca85a017c13e868f2b53c51efdbdd4479e1efae8be4690d"
 dependencies = [
  "aes-gcm 0.10.3",
  "chacha20poly1305 0.10.1",
@@ -5352,22 +5251,22 @@ dependencies = [
 
 [[package]]
 name = "sew-noise"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cf53ac86b896b7b853f99b79a6cceb4fee789ef387858b572253ba061ed9f01a"
+checksum = "499a45591500546afa1a8f39c1ac231469d7cb3205e8c0a17a7e398546fae040"
 dependencies = [
  "nnnoiseless",
  "realfft",
+ "rustix",
  "sha2 0.10.9",
 ]
 
 [[package]]
 name = "sew-proto"
-version = "0.10.4"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8f0d1849fb8d35f242ec503e954102adeae843fed17113403c49bbb59b9f9bf"
+checksum = "0f7990f0b73df7c4539fd5be4351b4d47b1cd56cc90b667e327ff9acbe493aaf"
 dependencies = [
- "chrono",
  "schemars 1.2.1",
  "serde",
  "serde_json",
@@ -5375,9 +5274,9 @@ dependencies = [
 
 [[package]]
 name = "sew-str0m"
-version = "0.25.5"
+version = "0.25.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94bff30d9f4099611473df4168f8c95095b31e382bd19db61b71276f6cd6b552"
+checksum = "011c4ff154db157e8cad7f7fb25fe979772693ed69664ff76cbc18045c2f78d3"
 dependencies = [
  "arrayvec",
  "base64ct",
@@ -6091,9 +5990,9 @@ dependencies = [
 
 [[package]]
 name = "tauri-plugin-sew-voice"
-version = "0.8.2"
+version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "18b965d275bd06c7104d48a6abd59c9f522efeff8d27fd85961e75cb9960eb64"
+checksum = "536180ad9c1b04a97a85534a4e54e38c78e5286c613d43f7606db9ba88c47480"
 dependencies = [
  "base64 0.22.1",
  "cpal",

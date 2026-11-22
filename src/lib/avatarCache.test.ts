@@ -21,7 +21,10 @@ import {
   iconRevFallback,
   isCacheableIcon,
   missingAvatarSources,
+  personAvatarItems,
+  personAvatarKey,
   queueAvatar,
+  queuePersonAvatars,
   queueServerAvatars,
   subdomainOfServerUrl,
   type AvatarItem,
@@ -31,10 +34,10 @@ const PNG = "data:image/png;base64,iVBORw0KGgo=";
 const JPG = "data:image/jpeg;base64,/9j/4AAQ";
 
 const urls: Record<string, string> = {
-  s1: "https://Riley.k2.dev",
+  s1: "https://Alice.k2.dev",
   s2: "https://bob.k2.dev:443/",
   lan: "http://192.168.1.50:60710",
-  connect: "https://riley.app.k2.dev",
+  connect: "https://alice.app.k2.dev",
 };
 
 function rows(...r: Record<string, unknown>[]) {
@@ -80,13 +83,13 @@ async function tick() {
 
 describe("keys and subdomains", () => {
   it("avatarKey is <subdomain>|<projectId>, lowercased and trimmed", () => {
-    expect(avatarKey(" Riley ", "Proj-ABC")).toBe("riley|proj-abc");
+    expect(avatarKey(" Alice ", "Proj-ABC")).toBe("alice|proj-abc");
   });
 
   it("subdomain is the first label of a <label>.k2.dev host only", () => {
-    expect(subdomainOfServerUrl("https://Riley.k2.dev")).toBe("riley");
+    expect(subdomainOfServerUrl("https://Alice.k2.dev")).toBe("alice");
     expect(subdomainOfServerUrl("https://bob.k2.dev:443/")).toBe("bob");
-    expect(subdomainOfServerUrl("https://riley.app.k2.dev")).toBeNull();
+    expect(subdomainOfServerUrl("https://alice.app.k2.dev")).toBeNull();
     expect(subdomainOfServerUrl("http://192.168.1.50:60710")).toBeNull();
     expect(subdomainOfServerUrl("https://k2.dev")).toBeNull();
     expect(subdomainOfServerUrl("not a url")).toBeNull();
@@ -104,18 +107,18 @@ describe("rev", () => {
 
   it("uses the row's iconRev when present, else the hash", () => {
     const items = avatarItemsFromProjects(
-      "riley",
+      "alice",
       rows({ id: "p1", iconUrl: PNG, iconRev: "rev-9" }, { id: "p2", iconUrl: JPG })
     );
     expect(items).toEqual([
-      { key: "riley|p1", rev: "rev-9", dataUrl: PNG },
-      { key: "riley|p2", rev: iconRevFallback(JPG), dataUrl: JPG },
+      { key: "alice|p1", rev: "rev-9", dataUrl: PNG },
+      { key: "alice|p2", rev: iconRevFallback(JPG), dataUrl: JPG },
     ]);
   });
 
   it("skips rows without an id or without a raster data: icon", () => {
     const items = avatarItemsFromProjects(
-      "riley",
+      "alice",
       rows(
         { iconUrl: PNG },
         { id: "p-http", iconUrl: "https://example.com/a.png" },
@@ -124,14 +127,14 @@ describe("rev", () => {
         { id: "p-ok", iconUrl: PNG }
       )
     );
-    expect(items.map((i) => i.key)).toEqual(["riley|p-ok"]);
+    expect(items.map((i) => i.key)).toEqual(["alice|p-ok"]);
     expect(isCacheableIcon("data:image/webp;base64,UklG")).toBe(true);
     expect(isCacheableIcon("data:text/plain,hi")).toBe(false);
   });
 
   it("an unrecognised projects/list body yields nothing", () => {
-    expect(avatarItemsFromProjects("riley", { ok: true, agents: [] })).toEqual([]);
-    expect(avatarItemsFromProjects("riley", null)).toEqual([]);
+    expect(avatarItemsFromProjects("alice", { ok: true, agents: [] })).toEqual([]);
+    expect(avatarItemsFromProjects("alice", null)).toEqual([]);
   });
 });
 
@@ -144,8 +147,8 @@ describe("queue + flush", () => {
     await tick();
     expect(calls).toHaveLength(1);
     expect(calls[0].map((i) => [i.key, i.dataUrl])).toEqual([
-      ["riley|p1", JPG],
-      ["riley|p2", PNG],
+      ["alice|p1", JPG],
+      ["alice|p2", PNG],
       ["bob|p1", PNG],
     ]);
   });
@@ -183,7 +186,7 @@ describe("queue + flush", () => {
     queueAvatar("s1", null, JPG);
     queueAvatar("s1", "p10", "https://x/y.png");
     await tick();
-    expect(calls).toEqual([[{ key: "riley|p9", rev: iconRevFallback(JPG), dataUrl: JPG }]]);
+    expect(calls).toEqual([[{ key: "alice|p9", rev: iconRevFallback(JPG), dataUrl: JPG }]]);
   });
 
   it("a plugin error keeps items unsent so the next load retries", async () => {
@@ -290,7 +293,7 @@ describe("pictures that are not data: URLs", () => {
     queueServerAvatars("s1", data, () => t);
     expect(fillIn).toHaveBeenCalledWith("s1", "c", "/w1");
     expect(download).toHaveBeenCalledWith("https://cdn.example.com/b.png");
-    await vi.waitFor(() => expect(__pendingAvatarKeysForTests()).toContain(avatarKey("riley", "b")));
+    await vi.waitFor(() => expect(__pendingAvatarKeysForTests()).toContain(avatarKey("alice", "b")));
     t += 60_000;
     queueServerAvatars("s1", data, () => t);
     expect(download).toHaveBeenCalledTimes(1);
@@ -301,5 +304,39 @@ describe("pictures that are not data: URLs", () => {
     install({ fillIn });
     queueServerAvatars("lan", rows({ id: "c" }));
     expect(fillIn).not.toHaveBeenCalled();
+  });
+});
+
+describe("Home chat people (person:<ext>)", () => {
+  it("the key is <subdomain>|person:<ext>, lowercased", () => {
+    expect(personAvatarKey("Alice", " k2:connect:ABC ")).toBe("alice|person:k2:connect:abc");
+  });
+
+  it("the rev is K2's pictureRev when sent, else the picture's hash", () => {
+    const items = personAvatarItems("alice", [
+      { ext: "k2:owner", picture: JPG, pictureRev: " h-owner-1 " },
+      { ext: "k2:connect:a", picture: PNG },
+      { ext: "k2:connect:b", picture: PNG, pictureRev: null },
+      { ext: "k2:connect:none", picture: null, pictureRev: "r" },
+      { ext: " ", picture: PNG, pictureRev: "r" },
+    ]);
+    expect(items).toEqual([
+      { key: "alice|person:k2:owner", rev: "h-owner-1", dataUrl: JPG },
+      { key: "alice|person:k2:connect:a", rev: iconRevFallback(PNG), dataUrl: PNG },
+      { key: "alice|person:k2:connect:b", rev: iconRevFallback(PNG), dataUrl: PNG },
+    ]);
+  });
+
+  it("a new pictureRev is sent again; the same one is not", async () => {
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: JPG, pictureRev: "r1" }]);
+    await tick();
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: JPG, pictureRev: "r1" }]);
+    await tick();
+    queuePersonAvatars("s1", [{ ext: "k2:owner", picture: PNG, pictureRev: "r2" }]);
+    await tick();
+    expect(calls).toEqual([
+      [{ key: "alice|person:k2:owner", rev: "r1", dataUrl: JPG }],
+      [{ key: "alice|person:k2:owner", rev: "r2", dataUrl: PNG }],
+    ]);
   });
 });

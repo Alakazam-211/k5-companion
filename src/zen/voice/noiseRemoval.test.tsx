@@ -231,7 +231,7 @@ describe("a call", () => {
     });
   });
 
-  it("leaves out timing fields that are absent, and keeps a measured zero", () => {
+  it("leaves out absent fields, and keeps a measured zero", () => {
     // A grace window open at the call's start, nothing slow yet.
     expect(noiseWords({ ...standard, in_grace: true, slowest_block_us: 0 })).toEqual([
       "noise",
@@ -251,13 +251,99 @@ describe("a call", () => {
       "last_step_down_ms_ago:0",
       "capture_stage_p99_us:0",
     ]);
-    // Not in grace, no counters: nothing new in the line.
-    expect(noiseWords({ ...standard, in_grace: false, blocks_over_budget: 0, capture_stage_strikes: 0 })).toEqual([
+  });
+
+  it("logs every field the plugin sends: false, 0 and null too", () => {
+    // Not in grace, no step-downs, no counters: each still says so.
+    expect(
+      noiseWords({ ...standard, step_downs: 0, in_grace: false, blocks_over_budget: 0, capture_stage_strikes: 0 })
+    ).toEqual([
       "noise",
       "standard",
       "standard",
       "dfn3",
+      "step_downs:0",
+      "blocks_over_budget:0",
+      "in_grace:false",
+      "capture_stage_strikes:0",
     ]);
+    // Fields this app doesn't know: after the known ones, by name; null as
+    // null, objects and arrays as compact JSON; undefined is absent.
+    expect(
+      noiseWords({
+        ...standard,
+        zeta: null,
+        alpha_ms: 0,
+        nested: { a: 1, b: [2, 3] },
+        list: ["x"],
+        flag: false,
+        gone: undefined,
+        step_downs: 1,
+      })
+    ).toEqual([
+      "noise",
+      "standard",
+      "standard",
+      "dfn3",
+      "step_downs:1",
+      "alpha_ms:0",
+      "flag:false",
+      'list:["x"]',
+      'nested:{"a":1,"b":[2,3]}',
+      "zeta:null",
+    ]);
+    // A model sent as null is not a leading word but still logged.
+    expect(noiseWords(JSON.parse('{"mode":"off","active":"off","model":null}'))).toEqual(["noise", "off", "off", "model:null"]);
+  });
+
+  it("logs DeepFilterNet3's state and the grace window (Sew 0.11.1) after the timing words", async () => {
+    await sewVoiceEngine().join("s1", "room-1", { onState: () => {} });
+    handlers.get("sew-voice://noise_removal")?.({
+      payload: {
+        // Sent in another order: the log keeps its own.
+        capture_stage_last_transient: "camera_start",
+        capture_stage_grace_over_budget: 0,
+        capture_stage_grace_blocks: 140,
+        capture_stage_grace: true,
+        capture_stage_starved: 0,
+        capture_stage_preempted_over_budget: 3,
+        capture_stage_clock: "thread_cpu",
+        p99_block_cpu_us: 2100,
+        grace_step_downs: 1,
+        retry_in_ms: 1500,
+        dfn3_state: "stepped_down",
+        capture_stage_p99_us: 6400,
+        in_grace: false,
+        step_downs: 1,
+        model: "rnnoise",
+        active: "standard",
+        mode: "standard",
+        some_later_field: 7,
+      },
+    });
+    expect(invoke).toHaveBeenCalledWith("voice_note", {
+      words: [
+        "noise",
+        "standard",
+        "standard",
+        "rnnoise",
+        "step_downs:1",
+        "in_grace:false",
+        "capture_stage_p99_us:6400",
+        "dfn3_state:stepped_down",
+        "retry_in_ms:1500",
+        "grace_step_downs:1",
+        "p99_block_cpu_us:2100",
+        "capture_stage_clock:thread_cpu",
+        "capture_stage_preempted_over_budget:3",
+        "capture_stage_starved:0",
+        "capture_stage_grace:true",
+        "capture_stage_grace_blocks:140",
+        "capture_stage_grace_over_budget:0",
+        "capture_stage_last_transient:camera_start",
+        "some_later_field:7",
+      ],
+    });
   });
 });
 

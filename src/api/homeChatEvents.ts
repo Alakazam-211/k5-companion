@@ -11,8 +11,13 @@
 //   - Frames: `hello` first (chat, flags, the calls already ringing), then
 //     `message`, `message_updated`, `deleted`, `read`, `reaction`, `typing`,
 //     `member_removed`, `summary_changed` (also when the socket fell
-//     behind), `status`, `call_ring`, `call_updated`. Unknown frames are
-//     dropped.
+//     behind), `status`, `call_ring`, `call_updated`, and (K2 0.46.16
+//     `home-chat-push-v1`) `notify {conv, level, effective, inherited,
+//     muted}` when this person's push level changed on any device. Unknown
+//     frames are dropped.
+//   - The one thing the phone sends up (0.46.16): the viewing lease,
+//     `{"t":"viewing","conv","visible"}` (api/homeChatViewing.ts), through
+//     the `send` that `onLink` hands over while the socket is open.
 //   - Pings every 25 s (the platform answers). A removed, disabled or
 //     signed-out login closes with 4003.
 //
@@ -22,27 +27,32 @@
 // unusable parks the socket until the gate opens; otherwise it keeps
 // trying once a minute (the phone never gives up for good). The backoff
 // starts over once a socket has stayed open 30 s. 4003 asks whoami on THIS
-// server (never deleting the token): a dead login stops the socket and
-// signals `signin`. Dials go through the dial queue; the app's background
-// closes the socket and the foreground reopens it; the `recovered` server
-// signal redials at once.
+// server (never deleting the token): a dead login, or a 401/403 whoami
+// could not explain, stops the socket and signals `signin`; a second 4003
+// before the socket stayed open stops it too (api/accessLive.ts). An
+// `access_changed` frame here (K2 0.46.17, if the platform sends it on this
+// socket) asks for the same one re-read as the app socket's copy. Dials
+// go through the dial queue; the app's background closes the socket and
+// the foreground reopens it; the `recovered` server signal redials at once.
 
 import type { ServerScope } from "./scope";
 import { queueDial, type DialTicket } from "./dialQueue";
-import { emitServerSignal, onServerSignal } from "./serverSignals";
+import { onServerSignal } from "./serverSignals";
 import { inBackground, onAppLifecycle } from "../lib/appLifecycle";
 import { jittered, STABLE_OPEN_MS } from "../lib/reconnect";
 import { openSocket } from "../lib/netStats";
-import { revive } from "../lib/revive";
+import { checkAfterRevoked, isAccessChangedFrame, noteAccessChanged } from "./accessLive";
 import {
   arr,
   idOf,
   obj,
   parseHomeChatFlags,
   parseHomeChatMessage,
+  parseHomeChatNotifyFrame,
   strOrNull,
   type HomeChatFlags,
   type HomeChatMessage,
+  type HomeChatNotifyFrame,
 } from "./homeChatPure";
 import { parseCall, parseHelloCall, parseRing, type HomeChatCall, type HomeChatRing } from "./homeChatCallsPure";
 import { noteHomeChatLink, onHomeChatGate, refreshHomeChatGate } from "./homeChat";
@@ -90,7 +100,8 @@ export type HomeChatFrame =
   | { type: "member_removed"; conv: string }
   | { type: "summary_changed"; conv: string | null }
   | { type: "call_ring"; conv: string; ring: HomeChatRing }
-  | { type: "call_updated"; conv: string; call: HomeChatCall };
+  | { type: "call_updated"; conv: string; call: HomeChatCall }
+  | ({ type: "notify" } & HomeChatNotifyFrame);
 
 /** A reaction frame's emoji: Sew's `{kind: "unicode", value}`, or a string. */
 function emojiOf(v: unknown): string | null {
@@ -164,6 +175,10 @@ export function parseHomeChatFrame(data: unknown): HomeChatFrame | null {
       const call = parseCall(v.d);
       return call ? { type: "call_updated", conv: conv ?? call.conv, call } : null;
     }
+    case "notify": {
+      const n = parseHomeChatNotifyFrame(v);
+      return n ? { type: "notify", ...n } : null;
+    }
     default:
       return null;
   }
@@ -185,12 +200,18 @@ export function homeChatRetryMs(attempt: number): number {
 
 // ─── The shared socket per server ───
 
+/** Sends one text frame on the server's open socket; false when none is. */
+export type HomeChatEventsSend = (text: string) => boolean;
+
 export interface HomeChatLinkInfo {
   /** The socket is open. */
   up: boolean;
   /** It opened again after a drop: frames may be missing (re-read the
    *  summary and the open chat; `hello` follows). */
   reopened: boolean;
+  /** While up: write a text frame on this server's socket (and on the next
+   *  one after a drop). The viewing lease's only way up. */
+  send?: HomeChatEventsSend;
 }
 
 interface Sub {
@@ -216,8 +237,14 @@ interface Hub {
   dead: boolean;
   stopped: boolean;
   checking: boolean;
+  /** Closed 4003 and not open long since: a second 4003 stops it. */
+  revoked: boolean;
   unhook: Array<() => void>;
+  send: HomeChatEventsSend;
 }
+
+/** A WebSocket's OPEN readyState (no global needed under test). */
+const WS_OPEN = 1;
 
 const hubs = new Map<string, Hub>();
 
@@ -234,7 +261,7 @@ function tell(hub: Hub, info: HomeChatLinkInfo): void {
 function setUp(hub: Hub, up: boolean, reopened = false): void {
   if (hub.up === up) return;
   hub.up = up;
-  tell(hub, { up, reopened });
+  tell(hub, up ? { up, reopened, send: hub.send } : { up, reopened });
 }
 
 function quiet(sock: WebSocket | null): void {
@@ -294,16 +321,18 @@ function afterDeadTry(hub: Hub): void {
 }
 
 /** 4003: whoami on this server first (a background socket never deletes
- *  the token). A login that still stands reconnects. */
+ *  the token). A login that still stands reconnects, unless this socket
+ *  was refused 4003 again without staying open. */
 async function afterRevoked(hub: Hub): Promise<void> {
   if (hub.checking) return;
   hub.checking = true;
+  const repeat = hub.revoked;
+  hub.revoked = true;
   try {
-    const outcome = await revive(hub.scope, { background: true });
+    const verdict = await checkAfterRevoked(hub.scope, { repeat });
     if (hub.stopped) return;
-    if (outcome === "signin-required" || outcome === "not-applicable") {
+    if (verdict !== "reconnect") {
       hub.dead = true;
-      emitServerSignal(hub.scope.id, "signin");
       return;
     }
     schedule(hub, jittered(homeChatRetryMs(hub.attempt++)));
@@ -363,7 +392,18 @@ function dialNow(hub: Hub): WebSocket | "failed" | null {
   };
   sock.onmessage = (e: MessageEvent) => {
     if (hub.stopped || hub.ws !== sock) return;
-    const f = parseHomeChatFrame(typeof e.data === "string" ? e.data : String(e.data));
+    const raw = typeof e.data === "string" ? e.data : String(e.data);
+    if (raw.includes("access_changed")) {
+      try {
+        if (isAccessChangedFrame(JSON.parse(raw))) {
+          noteAccessChanged(hub.scope.id);
+          return;
+        }
+      } catch {
+        /* not JSON: parseHomeChatFrame drops it */
+      }
+    }
+    const f = parseHomeChatFrame(raw);
     if (!f) return;
     if (f.type === "hello") noteHomeChatLink(hub.scope, { flags: f.flags, chat: f.chat });
     else if (f.type === "status") noteHomeChatLink(hub.scope, { chat: f.chat });
@@ -385,7 +425,10 @@ function dialNow(hub: Hub): WebSocket | "failed" | null {
       afterDeadTry(hub);
       return;
     }
-    if (stable) hub.attempt = 0;
+    if (stable) {
+      hub.attempt = 0;
+      hub.revoked = false;
+    }
     if (e?.code === HOME_CHAT_CLOSE_REVOKED) {
       void afterRevoked(hub);
       return;
@@ -428,7 +471,18 @@ function makeHub(scope: ServerScope): Hub {
     dead: false,
     stopped: false,
     checking: false,
+    revoked: false,
     unhook: [],
+    send: (text) => {
+      const s = hub.ws;
+      if (hub.stopped || !s || !hub.up || s.readyState !== WS_OPEN) return false;
+      try {
+        s.send(text);
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
   hub.unhook.push(
     onAppLifecycle((phase) => {
@@ -474,7 +528,7 @@ export function subscribeHomeChat(
   hub.subs.add(sub);
   if (hub.up) {
     try {
-      sub.onLink?.({ up: true, reopened: false });
+      sub.onLink?.({ up: true, reopened: false, send: hub.send });
     } catch {
       /* */
     }

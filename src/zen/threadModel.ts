@@ -116,6 +116,14 @@ export type ThreadMessage = {
    *  line on the sender's side. No bubble, name, status, receipt, files or
    *  menu; the receipt moves to the message before it. */
   deleted?: true;
+  /** A secret-request card (`doc.kind === "secret"`, `k2 thread secret`):
+   *  what the agent asked for and how K2 keeps it. Names and choices only;
+   *  the value the person pastes never lands here. */
+  secret?: ThreadSecret;
+  /** The doc carries a card this app can't draw (a `handoff`, a `secret`
+   *  without its card, a kind it doesn't know): a small "open it in the K2
+   *  desktop app" card shows under any words it has (cardFallback). */
+  unsupportedCard?: true;
 };
 
 /** What a deleted message shows, in the chat and as a list preview. */
@@ -166,6 +174,100 @@ export function stashOfferOf(doc: { kind?: unknown; stash?: unknown; author?: un
   if (typeof o.text !== "string" || !o.text.trim() || o.text.length > STASH_OFFER_TEXT_MAX) return null;
   const line = typeof o.title === "string" ? o.title.replace(/\s+/g, " ").trim().slice(0, STASH_OFFER_TITLE_MAX) : "";
   return { text: o.text, title: line || null };
+}
+
+/** How K2 sends a secret: `dst` is `basic`, `header:<Name>` or
+ *  `query:<param>`; `fmt` holds one `{}` where the value goes. */
+export type SecretInject = { dst: string; fmt: string };
+
+/** A secret card as served (K2 `SecretBody`, desktop `OverlaySecret`).
+ *  Never a value: names, the agent's choices, and after a save the
+ *  `k2v://` reference. */
+export type ThreadSecret = {
+  name: string;
+  /** `pending` | `set` | `voided` | `expired`. */
+  status: string;
+  prompt: string | null;
+  /** `workspace` | `server` | `session`. */
+  scope: string | null;
+  /** Sites, normalised origins (`https://api.stripe.com:443`). */
+  hosts: string[];
+  /** `fetch` | `file` | `env` | `agent`. */
+  delivery: string | null;
+  secretKind: string | null;
+  /** After a save: the `k2v://` reference. */
+  ref: string | null;
+  answeredBy: CardAuthor | null;
+  answeredAt: number | null;
+  expiresAt: number | null;
+  inject: SecretInject | null;
+  envName: string | null;
+  replaces: boolean;
+  once: boolean;
+  closedAs: CardClosedAs | null;
+  closeReason: string | null;
+};
+
+function str(v: unknown): string | null {
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+}
+
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** `doc.secret`, read defensively. Null without a name. Only the fields
+ *  the card shows are kept; anything else on the wire is dropped. */
+export function parseThreadSecret(raw: unknown): ThreadSecret | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const name = str(r.name);
+  if (!name) return null;
+  const inj = r.inject && typeof r.inject === "object" ? (r.inject as Record<string, unknown>) : null;
+  const closedAs = r.closedAs === "dismissed" || r.closedAs === "withdrawn" ? r.closedAs : null;
+  return {
+    name,
+    status: str(r.status) ?? "pending",
+    prompt: str(r.prompt),
+    scope: str(r.scope),
+    hosts: Array.isArray(r.hosts) ? r.hosts.filter((h): h is string => typeof h === "string" && h.trim() !== "") : [],
+    delivery: str(r.delivery),
+    secretKind: str(r.secretKind),
+    ref: str(r.ref),
+    answeredBy: parseCardAuthor(r.answeredBy),
+    answeredAt: num(r.answeredAt),
+    expiresAt: num(r.expiresAt),
+    inject: inj && typeof inj.dst === "string" && typeof inj.fmt === "string" ? { dst: inj.dst, fmt: inj.fmt } : null,
+    envName: str(r.envName),
+    replaces: r.replaces === true,
+    once: r.once === true,
+    closedAs,
+    closeReason: str(r.closeReason),
+  };
+}
+
+/** Kinds this app draws (as text, or as its own card). Any other kind gets
+ *  the fallback card under its words. */
+const PHONE_KINDS = new Set(["text", "chatter", "choice", "secret", "approval", "stash.offer", "changes"]);
+
+/** Card payloads the desktop draws that this app has no card for. */
+const UNDRAWN_CARD_FIELDS = ["handoff"] as const;
+
+/** Does this message show the "this app can't show it yet" card? The
+ *  general rule, so a card can never vanish silently again: a card this app
+ *  can't draw (a `handoff`, a secret without its card, an unknown kind), or
+ *  a message that would otherwise draw nothing at all (no words, no card,
+ *  no files). */
+export function cardFallback(m: ThreadMessage): boolean {
+  if (m.deleted) return false;
+  if (m.unsupportedCard) return true;
+  if (m.secret) return false;
+  if (m.choice && (m.choice.permission || m.choice.prompt.trim() || m.choice.options.length)) return false;
+  if (m.approval) return false;
+  if (m.stashOffer && !m.mine) return false;
+  if (m.text.trim()) return false;
+  if (m.files?.length) return false;
+  return true;
 }
 
 const TZ = "America/Denver";
@@ -353,13 +455,25 @@ export function normaliseThreadItem(
   const text = typeof textRaw === "string" ? textRaw : "";
   // Files may ride a message with an empty body (chips, no bubble).
   const files = parseThreadAttachments(doc.attachments);
+  // An empty plain message is nothing. Any other kind is kept, even with
+  // no words: it is a card, and one this app can't draw shows the fallback
+  // card (cardFallback) instead of vanishing.
   if (!text && !files.length && kind === "text") return null;
-  if (!text && !choice && !files.length && doc.kind !== "approval") return null;
+  const secret = kind === "secret" ? parseThreadSecret(doc.secret) : null;
   const from = String(doc.from || "");
   const atRaw = doc.created_at;
   const at = typeof atRaw === "number" && Number.isFinite(atRaw) ? atRaw : null;
   const m: ThreadMessage = { id, seq, text, from, at, mine: isMine(from, username), kind, choice };
   if (files.length) m.files = files;
+  if (secret) m.secret = secret;
+  const extra = doc as Record<string, unknown>;
+  if (
+    (kind === "secret" && !secret) ||
+    !PHONE_KINDS.has(kind) ||
+    UNDRAWN_CARD_FIELDS.some((f) => extra[f] != null && typeof extra[f] === "object")
+  ) {
+    m.unsupportedCard = true;
+  }
   const offer = stashOfferOf(doc as Parameters<typeof stashOfferOf>[0]);
   if (offer) m.stashOffer = offer;
   const approval = approvalCardOf(doc as Parameters<typeof approvalCardOf>[0]);

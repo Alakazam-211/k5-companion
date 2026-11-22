@@ -45,7 +45,7 @@ import {
   INCOMING_STAGGER_CAP_MS,
   INCOMING_STAGGER_MS,
   REPLY_FOLD_MS,
-} from "./listGlide";
+} from "../kit/mobileChat/listGlide";
 
 const CLIENT = 600;
 let height = 1800;

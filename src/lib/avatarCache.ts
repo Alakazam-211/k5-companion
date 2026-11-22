@@ -265,6 +265,47 @@ export function queueAvatar(
   }
 }
 
+/** The cache key of a Home chat person's picture (K2 0.46.16 Home chat
+ *  pushes: the NSE looks up `<subdomain>|person:<senderExt>`). */
+export function personAvatarKey(subdomain: string, ext: string): string {
+  return avatarKey(subdomain, `person:${ext.trim()}`);
+}
+
+/** A person's picture for the notification cache: a data URL, and its rev
+ *  when K2 names one (`pictureRev`, the same value as a Home chat push's
+ *  `avatarRev`; else a hash of the picture). */
+export type PersonAvatarSource = { ext: string; picture: string | null; pictureRev?: string | null };
+
+/** A server's Home chat people (`/cli/home-chat/people`, or a picture the
+ *  app fetched from `/cli/people/picture`): those with a picture go to the
+ *  notification cache, for a DM's or a channel's push. The rev is K2's
+ *  `pictureRev` when sent, so the native side replaces the cached image
+ *  exactly when the picture changes. Pure apart from the hash memo. */
+export function personAvatarItems(subdomain: string, people: ReadonlyArray<PersonAvatarSource>): AvatarItem[] {
+  const out: AvatarItem[] = [];
+  for (const p of people) {
+    if (!p.ext.trim() || !isCacheableIcon(p.picture)) continue;
+    const dataUrl = p.picture.trim();
+    const key = personAvatarKey(subdomain, p.ext);
+    const rev = typeof p.pictureRev === "string" && p.pictureRev.trim() ? p.pictureRev.trim() : null;
+    out.push({ key, rev: revFor(key, dataUrl, rev), dataUrl });
+  }
+  return out;
+}
+
+/** After a server's Home chat people loaded, or a person's picture was
+ *  fetched or read back from the device. Never throws. */
+export function queuePersonAvatars(serverId: string, people: ReadonlyArray<PersonAvatarSource>): void {
+  try {
+    if (disabled || !deps.enabled()) return;
+    const sub = subdomainOfServerUrl(deps.serverUrl(serverId));
+    if (!sub) return;
+    enqueue(personAvatarItems(sub, people));
+  } catch (e) {
+    console.warn("[avatars] queue skipped:", e);
+  }
+}
+
 /** Send what is queued now (the timer calls this). Concurrent calls share
  *  one run. Never throws. */
 export function flushAvatarCache(): Promise<void> {

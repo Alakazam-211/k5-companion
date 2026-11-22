@@ -32,10 +32,12 @@ import {
   memberRoleLabel,
   membersSubline,
   pickablePerson,
+  pictureRefOf,
 } from "./homeChatModel";
 import { noteHomeChatGone, useHomeChatStore } from "./homeChatStore";
 import { ChannelGlyph, PersonAvatar } from "./HomeChatGlyphs";
 import { HomeChatConfirmSheet } from "./HomeChatConfirmSheet";
+import { HomeChatNotifySetting, useHomeChatPushOn } from "./HomeChatNotifySetting";
 
 const ROW = "flex items-center gap-3 min-w-0";
 const SECTION = "text-[12px] font-semibold uppercase tracking-wide px-1 mb-1";
@@ -62,6 +64,8 @@ export function HomeChatMembersSheet({
   const [renaming, setRenaming] = useState<string | null>(null);
   const [ask, setAsk] = useState<"leave" | "delete" | null>(null);
   const vp = useViewport();
+  // K2 0.46.16: this person's push level for the channel.
+  const pushOn = useHomeChatPushOn(scope);
   useBackHandler(ask === null, onClose);
 
   useEffect(() => {
@@ -87,6 +91,8 @@ export function HomeChatMembersSheet({
   };
   const usernameOf = (ext: string): string =>
     ext === meExt ? scope.username() || "you" : ext === "k2:owner" ? "owner" : (personOf(ext)?.username ?? ext);
+  // Your own picture (`me.pictureRev`; you aren't on your people list).
+  const myPictureRef = pictureRefOf(scope.id, people ? { ext: meExt, username: scope.username(), pictureRev: people.me.pictureRev } : null);
   const addable = (people?.people ?? []).filter((p) => pickablePerson(p, meExt) && !inChannel.has(p.ext));
 
   /** One change, then the sheet's facts again. */
@@ -244,6 +250,7 @@ export function HomeChatMembersSheet({
           ) : null}
           {members ? (
             <>
+              {pushOn && members.state !== "archived" && inChannel.has(meExt) ? <HomeChatNotifySetting scope={scope} conv={conv} /> : null}
               <h3 className={SECTION} style={{ color: "var(--color-text-muted)" }}>
                 People
               </h3>
@@ -254,7 +261,7 @@ export function HomeChatMembersSheet({
                   const notes = [role, p.ext === members.creator ? "Created it" : null, p.state === "pending_add" ? "Adding…" : null].filter(Boolean);
                   return (
                     <li key={p.ext} className={ROW} style={{ minHeight: 52, padding: "6px 4px" }} data-member={p.ext}>
-                      <PersonAvatar username={usernameOf(p.ext)} name={p.ext === meExt ? scope.username() || "You" : nameOf(p.ext)} picture={person?.picture ?? null} size={34} />
+                      <PersonAvatar username={usernameOf(p.ext)} name={p.ext === meExt ? scope.username() || "You" : nameOf(p.ext)} picture={person?.picture ?? null} pictureOf={p.ext === meExt ? myPictureRef : pictureRefOf(scope.id, person)} size={34} />
                       <span className="flex flex-col flex-1 min-w-0">
                         <span className="text-[16px] truncate">{nameOf(p.ext)}</span>
                         {notes.length ? (
@@ -330,7 +337,7 @@ export function HomeChatMembersSheet({
                               >
                                 {on ? <CheckIcon size={14} strokeWidth={3} /> : null}
                               </span>
-                              <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} size={30} />
+                              <PersonAvatar username={p.username} name={p.displayName} picture={p.picture} pictureOf={pictureRefOf(scope.id, p)} size={30} />
                               <span className="flex-1 min-w-0 truncate text-[16px]">{p.displayName}</span>
                             </button>
                           </li>

@@ -6,6 +6,7 @@ import { initZenFont } from "./zen/zenFont";
 import { initTheme } from "./theme/palettes";
 import { watchSystemScheme } from "./theme/themeStore";
 import { wireHomeChatCalls } from "./zen/homeChat/wireCalls";
+import { wireAccessLive } from "./zen/accessLive";
 import { installAndroidBack } from "./lib/androidBack";
 import { initKbDragRecorder } from "./lib/kbDragRecorder";
 import { initKbDiag } from "./lib/kbDiag";
@@ -55,6 +56,8 @@ initTheme();
 watchSystemScheme();
 // Home (4.3.0): DM calls joined to the rows and the chat view.
 wireHomeChatCalls();
+// K2 0.46.17 `access_changed`: re-read this login's access on that server.
+wireAccessLive();
 
 // Diagnostics → Keyboard drag recorder (off by default: one pref read).
 initKbDragRecorder();

@@ -8,10 +8,15 @@
 // (ThreadDraftComposer / GlassComposer, drafts kept per conversation), the
 // message hold menu (useMessageHold + AgentMenu), the reply chip and quote
 // line, the jump pill, and the mobile chat kit (keyboard FLIP, interactive
-// dismiss, scroll room, focus gap, tap to dismiss).
+// dismiss, scroll room, focus gap, tap to dismiss) and its send motion:
+// the typed text flies into its bubble as the list glides up to make room
+// (fades under reduced motion), and the Sending… bubble breathes, then
+// brightens when delivered.
 //
 // What differs:
 //   - names over every run in a channel; in a DM only the other person's;
+//   - a channel's sender pictures beside the tail of each run's last
+//     bubble (never in a DM: one other person);
 //   - the hold menu lifts the held bubble above a dim, the six quick emoji
 //     above it, then Reply, Copy, Save to stash, More emoji…; chips under bubbles;
 //   - Reply sends Sew's reference (`replyTo`), and the quote strip jumps
@@ -21,15 +26,25 @@
 //   - read: `view {open}` while on screen, `ack` for the newest while the
 //     app is in front;
 //   - a call's record is a line with Call back (the calls part's hook);
-//   - a channel's header opens its members sheet.
+//   - a channel's header opens its members sheet;
+//   - a message that mentions you (Sew's `mentions`, or `@you` in its
+//     words) gets a quiet accent ring;
+//   - pushes (K2 0.46.16 `home-chat-push-v1` only): while the chat is on
+//     screen and the app in front, the viewing lease on the events socket
+//     (the daemon holds this chat's pushes) and the native side's "on
+//     screen" (a push for it that slips through shows no banner); reading
+//     it clears its notifications here too.
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { scopeFor } from "../../api/scope";
 import { ackHomeChat, homeChatGateNow, onHomeChatGate, viewHomeChat } from "../../api/homeChat";
-import { subscribeHomeChat } from "../../api/homeChatEvents";
+import { subscribeHomeChat, type HomeChatEventsSend } from "../../api/homeChatEvents";
+import { createViewingLease, type ViewingLease } from "../../api/homeChatViewing";
 import { REPLY_JUMP_MAX_PAGES, isOptimistic, typingMembers } from "../../api/homeChatHelpers";
-import { homeChatNoChatLine, type HomeChatMessage } from "../../api/homeChatPure";
+import { homeChatMentionsMe, homeChatNoChatLine, type HomeChatMessage } from "../../api/homeChatPure";
 import { copyPlainText } from "../../lib/clipboard";
+import { clearDelivered } from "../../lib/deliveredClear";
+import { setNativeHomeChatViewing } from "../../lib/homeChatPush";
 import { useViewport, useViewportPadRef } from "../../lib/useViewportHeight";
 import { useKeyboardFlip } from "../../kit/mobileChat/useKeyboardFlip";
 import { easeGapShift, useComposerFocusGap } from "../../kit/mobileChat/useComposerFocusGap";
@@ -48,13 +63,23 @@ import { ServerChip } from "../room/ServerChip";
 import { useMessageHold } from "../stash/useMessageHold";
 import { captureTopMessage, nearNewest, restoreTopMessage, stickToNewest, type MessageAnchor } from "../threadScroll";
 import { composerDraftOf, useComposerDrafts } from "../composerDrafts";
-import { prefersReducedMotion } from "../sendFly";
+import {
+  flySourceOfField,
+  prefersReducedMotion,
+  rectOf,
+  runSendFly,
+  type FlyMotion,
+  type FlySource,
+} from "../../kit/mobileChat/sendFly";
+import { createListGlider, type ListGlider } from "../../kit/mobileChat/listGlide";
 import {
   ORIGINAL_DELETED,
   ORIGINAL_NOT_LOADED,
   authorName,
   convKey,
   firstLine,
+  homeChatFace,
+  pictureRefOf,
   homeChatRows,
   homeChatStashSource,
   memberNames,
@@ -62,6 +87,7 @@ import {
   replyPreview,
   sendFailedNote,
   typingNames,
+  type HomeChatFace,
   type HomeChatTarget,
   type JumpMiss,
 } from "./homeChatModel";
@@ -90,6 +116,8 @@ import { HomeChatCallLine, HomeChatMessageRow, type HomeChatRowActions } from ".
 import { EmojiSheet, QUICK_ROW_PX, QuickReactionRow } from "./HomeChatReactions";
 import { HomeChatTyping } from "./HomeChatTyping";
 import { HomeChatMembersSheet } from "./HomeChatMembersSheet";
+import { useHomeChatPushOn } from "./HomeChatNotifySetting";
+import { applyHomeChatNotifyFrame } from "./homeChatNotify";
 import { ChannelAvatar, PersonAvatar } from "./HomeChatGlyphs";
 import "./homeChat.css";
 
@@ -106,13 +134,10 @@ const TYPING_ROOM_PX = 20;
 const FLASH_MS = 1400;
 const AVATAR_LIFT = "drop-shadow(0 3px 8px var(--color-shadow))";
 const COMPOSER_PREFIX = "home-chat-composer";
+/** A fade (reduced motion) is done by then (sendFly.css: 180 ms). */
+const FLY_FADE_MS = 220;
 /** The Thread's words when a stash save fails. */
 const STASH_FAILED = "Couldn't save to the stash. Try again.";
-/** How far below the floating header text starts to fade once the list
- *  has scrolled (the scroll-edge fade, `.zen-header-blur--edge`): 24px
- *  below the name pill, whose bottom edge is the header's 12px padding
- *  above the header's bottom. */
-const HEADER_FADE_PX = 12;
 
 /** The composer draft's key for a conversation (kept here for callers). */
 export { homeChatDraftKey };
@@ -135,6 +160,18 @@ function dockBlockPx(dock: HTMLElement): number {
 }
 
 type PendingReply = { id: string; from: string; text: string };
+
+/** The send animation: which bubble (by its send's nonce, the row's key
+ *  from optimistic to the server's copy) flies in, and from where. */
+type HomeFly = {
+  nonce: string;
+  source: FlySource | null;
+  /** Reduced motion / no Web Animations: fade instead of fly. */
+  fade: boolean;
+  /** The newest row and its top before Send: how far the list moves to
+   *  make room (the glide). */
+  anchor: MessageAnchor | null;
+};
 
 export function HomeChatView({
   target,
@@ -197,6 +234,18 @@ export function HomeChatView({
     [serverId]
   );
 
+  // ── Pushes (K2 0.46.16): the viewing lease rides the events socket ──
+  const pushOn = useHomeChatPushOn(scope);
+  const sendRef = useRef<HomeChatEventsSend | null>(null);
+  const leaseRef = useRef<ViewingLease | null>(null);
+  if (!leaseRef.current) {
+    leaseRef.current = createViewingLease({
+      send: (text) => sendRef.current?.(text) ?? false,
+      setInterval: (fn, ms) => setInterval(fn, ms),
+      clearInterval: (t) => clearInterval(t as ReturnType<typeof setInterval>),
+    });
+  }
+
   // ── Reads, live frames, view / ack ──
   useEffect(() => {
     void ensureHomeChatPeople(scope);
@@ -213,11 +262,16 @@ export function HomeChatView({
       scope,
       (f) => {
         applyHomeChatFrame(serverId, f);
+        if (f.type === "notify") applyHomeChatNotifyFrame(serverId, f);
         if (f.type === "member_removed" && f.conv === conv && !dm) void loadHomeChatChannel(scope, conv);
       },
       {
         // Back after a drop: frames may be missing. Read what came after.
         onLink: (info) => {
+          // The lease goes again at once on every (re)opened socket: the
+          // daemon dropped it with the old one.
+          sendRef.current = info.up ? (info.send ?? null) : null;
+          if (info.up) leaseRef.current?.linked();
           if (info.up && info.reopened) {
             void loadHomeChatNewest(scope, conv);
             void viewHomeChat(scope, conv, true);
@@ -229,10 +283,30 @@ export function HomeChatView({
     const prune = setInterval(() => useHomeChatStore.getState().pruneTyping(Date.now()), 1000);
     return () => {
       unsub();
+      sendRef.current = null;
       clearInterval(prune);
       void viewHomeChat(scope, conv, false);
     };
   }, [scope, serverId, conv, dm]);
+
+  // On screen and in front: the lease (every 30 s), and the native side's
+  // "this chat is open". Hidden or gone: `visible:false` at once.
+  useEffect(() => {
+    const lease = leaseRef.current;
+    if (!lease || !conv || !pushOn) return;
+    const apply = () => {
+      const shown = typeof document === "undefined" || document.visibilityState !== "hidden";
+      lease.set(shown ? conv : null);
+      setNativeHomeChatViewing(shown ? serverId : null, shown ? conv : null);
+    };
+    apply();
+    document.addEventListener("visibilitychange", apply);
+    return () => {
+      document.removeEventListener("visibilitychange", apply);
+      lease.stop();
+      setNativeHomeChatViewing(null, null);
+    };
+  }, [pushOn, conv, serverId]);
 
   const real = useMemo(() => messages.filter((m) => !isOptimistic(m)), [messages]);
   const newestId = real.length ? real[real.length - 1].id : null;
@@ -241,7 +315,11 @@ export function HomeChatView({
     if (!conv || !newestId) return;
     const ack = () => {
       if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-      void ackHomeChat(scope, conv);
+      void ackHomeChat(scope, conv).then((r) => {
+        // Read here: its notifications up to the newest go too (the
+        // daemon's read hint clears the other phones).
+        if (r.ok) void clearDelivered(serverId, { mode: "read", chats: [{ kind: "home", id: conv, upTo: newestId }] });
+      });
     };
     ack();
     const onVis = () => {
@@ -249,7 +327,7 @@ export function HomeChatView({
     };
     document.addEventListener("visibilitychange", onVis);
     return () => document.removeEventListener("visibilitychange", onVis);
-  }, [scope, conv, newestId]);
+  }, [scope, serverId, conv, newestId]);
 
   // ── Who it is ──
   const person = dm && target.ext ? (people?.people.find((p) => p.ext === target.ext) ?? null) : null;
@@ -286,19 +364,6 @@ export function HomeChatView({
   const [atNewest, setAtNewest] = useState(true);
   const [newCount, setNewCount] = useState(0);
   const [headerRef, headerPx] = useMeasuredHeight(HEADER_PX);
-  // The header's scroll-edge fade is on once the list is off its top (at
-  // rest the first message sits sharp just under the header).
-  const headerBlurRef = useRef<HTMLDivElement>(null);
-  const markScrolled = (el: HTMLElement) => {
-    const blur = headerBlurRef.current;
-    if (!blur) return;
-    const on = el.scrollTop > 1;
-    if ((blur.getAttribute("data-scrolled") === "1") !== on) blur.setAttribute("data-scrolled", on ? "1" : "0");
-  };
-  useLayoutEffect(() => {
-    const el = scrollerRef.current;
-    if (el) markScrolled(el);
-  });
   const [dockPx, setDockPx] = useState(0);
   const dockPxRef = useRef<number | null>(null);
 
@@ -307,6 +372,19 @@ export function HomeChatView({
     setAtNewest(on);
     if (on) setNewCount(0);
   };
+
+  // ── The send motion (mobile chat kit) ──
+  const [fly, setFly] = useState<HomeFly | null>(null);
+  // One owner for the list's transform: a second send mid-glide folds in.
+  const gliderRef = useRef<ListGlider | null>(null);
+  if (!gliderRef.current) gliderRef.current = createListGlider(() => contentRef.current);
+  const glider = gliderRef.current;
+  // Another conversation: nothing of this one's flight carries over.
+  useLayoutEffect(() => {
+    setFly(null);
+    glider.cancel();
+  }, [key, glider]);
+  useEffect(() => () => glider.cancel(), [glider]);
 
   // The dock floats over the scroller's bottom: measure it.
   useLayoutEffect(() => {
@@ -419,6 +497,60 @@ export function HomeChatView({
     setNewCount((n) => n + 1);
   }, [key, messages, me]);
 
+  // The send fly (FLIP "last/invert/play"), once per send. The row is in
+  // its final slot (hidden while it flies); the field already snapped to
+  // one empty line in the Send commit.
+  const flyKey = fly ? fly.nonce : "";
+  useLayoutEffect(() => {
+    if (!fly) return;
+    const id = fly.nonce;
+    const clear = () => setFly((cur) => (cur?.nonce === id ? null : cur));
+    const el = scrollerRef.current;
+    const root = rootRef.current;
+    // The cleared field shrank the dock in this commit, but its
+    // ResizeObserver reports a frame later: take the new height now, so
+    // the slot is final before the bubble is aimed.
+    const dock = dockRef.current;
+    const px = dock ? dockBlockPx(dock) : 0;
+    if (el && px > 0 && px !== dockPxRef.current) {
+      dockPxRef.current = px;
+      el.style.paddingBottom = threadBottomPadding(px, TYPING_ROOM_PX);
+      setDockPx(px);
+    }
+    if (el && !interactiveRef.current) {
+      stickToNewest(el);
+      lastTop.current = el.scrollTop;
+    }
+    if (fly.fade || !fly.source) {
+      const t = setTimeout(clear, FLY_FADE_MS);
+      return () => clearTimeout(t);
+    }
+    const target = () => root?.querySelector<HTMLElement>('[data-fly-target="true"]') ?? null;
+    const bubble = target();
+    if (!root || !bubble) {
+      clear();
+      return;
+    }
+    // The list makes room as the bubble comes in, on the bubble's curve,
+    // started once the bubble's resting rect is read (glide-free).
+    const a = fly.anchor;
+    const now = a && a.el.isConnected ? rectOf(a.el) : null;
+    const dy = a && now ? a.top - now.top : 0;
+    const glide =
+      el && Math.abs(dy) >= 1 && Math.abs(dy) <= el.clientHeight
+        ? {
+            content: contentRef.current,
+            dy,
+            run: (d: number, motion: FlyMotion) => {
+              glider.shift(d, { motion });
+              return () => {};
+            },
+          }
+        : undefined;
+    return runSendFly({ root, bubble, target, source: fly.source, done: clear, glide });
+    // Once per send: a re-render mid-flight must not restart it.
+  }, [flyKey]);
+
   // ── Older pages: keep the message being read where it is ──
   const olderAnchor = useRef<MessageAnchor | null>(null);
   const rowsNow = () => Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-home-chat-msg]") ?? []);
@@ -509,22 +641,50 @@ export function HomeChatView({
     return () => flush();
   }, []);
 
+  /** Send tap: clear the field at once (focus and keyboard stay), show
+   *  the bubble "Sending…", fly the text into it, deliver behind it. */
   const onSend = () => {
     if (!conv || readOnly) return;
     const text = (draftApi.current?.get() ?? "").trim();
     if (!text) return;
     const replyTo = reply?.id ?? null;
+    // Where the text sits now, before it is cleared (the FLIP "first"),
+    // and the newest row's top (after the new row is in, how far it moved).
+    const source = flySourceOfField(composerRef.current);
+    const drawn = rowsNow();
+    const lastRow = drawn.length ? drawn[drawn.length - 1] : null;
+    const lastRect = rectOf(lastRow);
+    const anchor = lastRow && lastRect ? { el: lastRow, top: lastRect.top } : null;
     draftApi.current?.set("");
     setReply(null);
     setError(null);
     setJumpMiss(null);
     setFollowing(true);
     composerRef.current?.focus({ preventScroll: true });
-    void sendHomeChat(scope, conv, { text, replyTo }).then((ok) => {
+    const queued: { nonce: string | null } = { nonce: null };
+    void sendHomeChat(
+      scope,
+      conv,
+      { text, replyTo },
+      {
+        // Only a bubble this send just added flies (a "Not sent" one of
+        // the same words is already on screen: it just goes Sending…).
+        onQueued: (nonce, fresh) => {
+          if (fresh) queued.nonce = nonce;
+        },
+      }
+    ).then((ok) => {
       if (ok) return;
       // Found by its words on this server: a DM Sew lost may have moved.
       setError(sendFailedNote(findHomeChatSend(serverId, { text })));
     });
+    if (!queued.nonce) return;
+    const canFly =
+      !prefersReducedMotion() &&
+      source != null &&
+      typeof Element !== "undefined" &&
+      typeof Element.prototype.animate === "function";
+    setFly({ nonce: queued.nonce, source: canFly ? source : null, fade: !canFly, anchor: canFly ? anchor : null });
   };
 
   const actions = useMemo<HomeChatRowActions>(
@@ -607,7 +767,31 @@ export function HomeChatView({
 
   // ── Rows ──
   const rows = useMemo(() => homeChatRows(messages, me, names, target.kind), [messages, me, names, target.kind]);
+  // The sender pictures (a channel's): one object per member while the
+  // people answer holds, so the memoized rows compare them by identity.
+  const faces = useMemo(() => {
+    const out = new Map<string, HomeChatFace>();
+    return (authorId: string): HomeChatFace => {
+      let f = out.get(authorId);
+      if (!f) {
+        f = homeChatFace(people, authorId, serverId);
+        out.set(authorId, f);
+      }
+      return f;
+    };
+  }, [people, serverId]);
   const byId = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  // Messages that mention you: Sew's `mentions`, or `@<your username or
+  // name>` in the words.
+  const myNames = useMemo(() => {
+    const mine = people ? people.people.find((p) => p.ext === people.me.ext) : undefined;
+    return [scope.username(), mine?.username ?? "", mine?.displayName ?? ""].filter((n) => !!n.trim());
+  }, [people, scope]);
+  const mentionIds = useMemo(() => {
+    const out = new Set<string>();
+    for (const m of messages) if (homeChatMentionsMe(m, { memberId: me, names: myNames })) out.add(m.id);
+    return out;
+  }, [messages, me, myNames]);
   const typingNow = useMemo(
     () => typingNames(roster ? typingMembers(roster, Date.now(), me) : [], me, names),
     [roster, me, names]
@@ -635,16 +819,11 @@ export function HomeChatView({
         data-testid="home-chat-header"
         style={{ zIndex: 10, paddingTop: "env(safe-area-inset-top)", pointerEvents: "none" }}
       >
-        {/* The scroll-edge fade (K2 Design 4.3.0): once the list has
-            scrolled, text fades in the band under the header and is gone
-            before it reaches the name pill (`--edge` in index.css). */}
-        <div
-          ref={headerBlurRef}
-          className="zen-header-blur zen-header-blur--early zen-header-blur--edge"
-          data-testid="home-chat-header-blur"
-          style={{ ["--zen-edge-fade" as string]: `${HEADER_FADE_PX}px` }}
-          aria-hidden
-        >
+        {/* The agent chats' header blur and tint, as they are (the owner
+            2026-11-19: "DMs on mobile should have the same gradient system
+            at the top of the page as in the chats with agents"; replaces
+            4.3.0's solid scroll-edge fade, `--edge`). */}
+        <div className="zen-header-blur" data-testid="home-chat-header-blur" aria-hidden>
           <span className="zen-header-blur-1" />
           <span className="zen-header-blur-2" />
           <span className="zen-header-blur-3" />
@@ -683,7 +862,7 @@ export function HomeChatView({
           >
             <span className="relative flex" style={{ zIndex: 2, filter: AVATAR_LIFT }} data-testid="home-chat-header-avatar">
               {dm ? (
-                <PersonAvatar username={person?.username || target.ext || title} name={title} picture={person?.picture ?? null} size={HEADER_AVATAR_PX} />
+                <PersonAvatar username={person?.username || target.ext || title} name={title} picture={person?.picture ?? null} pictureOf={pictureRefOf(serverId, person)} size={HEADER_AVATAR_PX} />
               ) : (
                 <ChannelAvatar inviteOnly={inviteOnly} size={HEADER_AVATAR_PX} />
               )}
@@ -718,7 +897,6 @@ export function HomeChatView({
         data-testid="home-chat-scroller"
         onScroll={(e) => {
           const el = e.currentTarget;
-          markScrolled(el);
           lastScrollAt.current = Date.now();
           const prev = lastTop.current;
           lastTop.current = el.scrollTop;
@@ -818,13 +996,18 @@ export function HomeChatView({
                     mine={r.mine}
                     name={r.name}
                     run={r.run}
+                    column={r.column}
+                    face={r.picture ? faces(r.m.authorId) : null}
                     reply={r.m.replyTo ? replyPreview(byId.get(r.m.replyTo), me, names) : null}
                     flash={flashId === r.m.id}
+                    mention={!r.mine && mentionIds.has(r.m.id)}
                     held={msgHold.menu?.id === r.m.id}
                     send={isOptimistic(r.m) && r.m.nonce ? (sends?.[r.m.nonce] ?? null) : null}
                     readOnly={readOnly}
                     canEdit={draftBlank}
                     actions={actions}
+                    flying={!!fly && !fly.fade && !!r.m.nonce && r.m.nonce === fly.nonce}
+                    fadeIn={!!fly && fly.fade && !!r.m.nonce && r.m.nonce === fly.nonce}
                   />
                 )
               )}

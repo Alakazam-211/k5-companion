@@ -2054,6 +2054,25 @@ fn voice_screen(_app: tauri::AppHandle) -> serde_json::Value {
     }
 }
 
+/// The call screen's self-view tile is shown (`tile`) and your camera is on
+/// or paused (`camera`): the native self-view's sink opens while both are
+/// true in a call (voice/self_view.rs). Answers whether this shell draws the
+/// self-view natively (iOS); false elsewhere, where the page keeps its own.
+#[tauri::command]
+fn voice_self_view(_app: tauri::AppHandle, tile: bool, camera: bool) -> bool {
+    #[cfg(target_os = "ios")]
+    {
+        use tauri::Manager;
+        voice::set_self_view(&_app.state::<voice::Native>(), tile, camera);
+        return true;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = (tile, camera);
+        false
+    }
+}
+
 /// "Join with camera": the voice plugin's join with the camera on, as a
 /// video call in CallKit. Rejects as the plugin's `join` does
 /// (`{code, detail}`); `video_unsupported` off iOS.
@@ -2077,6 +2096,32 @@ async fn voice_join_camera(
         let _ = (target, room);
         Err(serde_json::json!({ "code": "video_unsupported", "detail": null }))
     }
+}
+
+/// Open the call's event feed on `server` (K2 0.46.17
+/// `/_k2/voice/sew/feed`, voice/feed.rs), closing any other: its number,
+/// whose `k2-voice://feed` events follow. `None` with no address or token
+/// for that server, and off iOS.
+#[tauri::command]
+async fn voice_feed_open(_app: tauri::AppHandle, server: String) -> Option<u64> {
+    #[cfg(target_os = "ios")]
+    {
+        use tauri::Manager;
+        let native = _app.state::<voice::Native>().inner().clone();
+        return voice::feed::open(&native, server).await;
+    }
+    #[allow(unreachable_code)]
+    {
+        let _ = server;
+        None
+    }
+}
+
+/// Close the call's event feed. Nothing off iOS.
+#[tauri::command]
+fn voice_feed_close() {
+    #[cfg(target_os = "ios")]
+    voice::feed::close();
 }
 
 /// The last call events as text, for "Send call log" (codes only: no
@@ -2173,7 +2218,10 @@ pub fn run() {
             voice_note,
             voice_join_camera,
             voice_pip_speaker,
-            voice_screen
+            voice_screen,
+            voice_self_view,
+            voice_feed_open,
+            voice_feed_close
         ])
         .build(tauri::generate_context!())
         .expect("error while building K2 Companion");

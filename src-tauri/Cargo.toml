@@ -1,6 +1,6 @@
 [package]
 name = "k2so-companion"
-version = "4.3.0"
+version = "4.3.1"
 description = "Mobile companion for K2 agent orchestrator"
 authors = ["Alakazam Labs"]
 edition = "2021"
@@ -45,10 +45,19 @@ tauri-plugin-http = "2"
 objc2 = "0.6.4"
 
 # Voice rooms (4.2.0, iOS first; Android later): Sew's native voice
-# plugin over sew-call-client and K2's kessel-audio. Sew 0.10.4: plugin and
-# call client 0.8.2, the first on crates.io (no mirror patch any more), with
-# sew-str0m 0.25.5, kessel-audio (0.2.1: the phone's raw capture for noise
-# removal Off) and the sew-* support crates 0.10.4, all from crates.io.
+# plugin over sew-call-client and K2's kessel-audio. Sew 0.11.3: plugin and
+# call client 0.9.3 (0.8.2 was their first crates.io release), with
+# sew-str0m 0.25.6, kessel-audio 0.2.5 (the DSP scheduling is a host setting,
+# VoiceControl::set_dsp_sched, applied from the next call; the noise_removal
+# state reports capture_stage_dsp_*), Record/Stop and consent reaching the
+# host's provider (the RoomRecorder fix), the native self-view sink
+# (open_native_sink on local:camera) and the sew-* support crates 0.11.3,
+# all from crates.io. The `noise-probe` feature stays off here: only a
+# measurement build turns it on.
+# 0.9.0 makes CallState, JoinArgs, Participant, VideoCaps and sew-call-client's
+# JoinRequest #[non_exhaustive] (src/voice.rs builds JoinArgs with ::new and
+# matches CallState with a wildcard arm); recordings gain started_at (0.8.3)
+# and audio_keep_days (0.8.4). The noise_removal event is unchanged.
 # `mobile` is the pure-Rust DTLS/SRTP that phones need; the build stops
 # without it.
 # macOS too, only so `cargo test` runs src/voice.rs's tests on the Mac; the
@@ -65,15 +74,20 @@ base64 = "0.22"
 # resource directory. Since 0.8.1 the plugin only checks them at start and
 # loads the model when a call first needs it (released after an idle time).
 # 0.8.2: grace windows for noise removal's timing rules (src/voice.rs).
-tauri-plugin-sew-voice = { version = "0.8.2", default-features = false, features = ["tauri", "audio", "mobile", "builtin-ring-provider", "video-core", "video", "dfn3"] }
-sew-call-client = { version = "0.8.2", default-features = false, features = ["mobile"] }
+tauri-plugin-sew-voice = { version = "0.9.3", default-features = false, features = ["tauri", "audio", "mobile", "builtin-ring-provider", "video-core", "video", "dfn3"] }
+sew-call-client = { version = "0.9.3", default-features = false, features = ["mobile"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 url = "2"
+# The call's event feed (src/voice/feed.rs, K2 0.46.17): reqwest's HTTP/1
+# upgrade, then tungstenite on the upgraded stream (no TLS of its own).
+tokio-tungstenite = { version = "0.26", default-features = false }
+futures-util = "0.3"
+tokio = { version = "1", features = ["time"] }
 
 # src/voice.rs's tests: the DeepFilterNet3 weights' pinned sha256, which
 # scripts/fetch-dfn3.sh must match (the same sew-noise the plugin uses).
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dev-dependencies]
-sew-noise = { version = "0.10.4", features = ["dfn3"] }
+sew-noise = { version = "0.11.3", features = ["dfn3"] }
 
 [profile.release]
 strip = true

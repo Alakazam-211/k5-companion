@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import {
   LiveTextCommitPipeline,
   type LiveLocalEdit,
@@ -31,12 +31,30 @@ interface Props {
    *  bar's chords share the flush-pending-first ordering. Cleared to
    *  null on unmount. */
   sendKeyRef?: { current: ((bytes: string, localEdit?: LiveLocalEdit) => void) | null };
+  /** The accessory bar's sticky Ctrl is armed: the next typed character
+   *  goes out as its control byte (the pipeline does it, so it is one
+   *  byte and the letter never lands). */
+  ctrlArmed?: boolean;
+  /** The pipeline used the armed Ctrl up (a typed key, or a control
+   *  byte went out) — the owner un-presses the key. */
+  onCtrlDisarm?: () => void;
+  /** The field lost focus (the keyboard went down). */
+  onBlur?: () => void;
 }
 
-export function LiveInputCapture({ send, focusRef, sendKeyRef }: Props) {
+export function LiveInputCapture({
+  send,
+  focusRef,
+  sendKeyRef,
+  ctrlArmed = false,
+  onCtrlDisarm,
+  onBlur,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const sendRef = useRef(send);
   sendRef.current = send;
+  const onCtrlDisarmRef = useRef(onCtrlDisarm);
+  onCtrlDisarmRef.current = onCtrlDisarm;
 
   // One pipeline per mount; the sink reads through refs so the latest
   // send prop and the live DOM node are always the targets.
@@ -47,9 +65,15 @@ export function LiveInputCapture({ send, focusRef, sendKeyRef }: Props) {
         setFieldValue: (value) => {
           if (inputRef.current) inputRef.current.value = value;
         },
+        onCtrlDisarm: () => onCtrlDisarmRef.current?.(),
       }),
     []
   );
+
+  // Layout effect: the Ctrl tap's commit lands before the next key event.
+  useLayoutEffect(() => {
+    pipeline.setCtrlArmed(ctrlArmed);
+  }, [pipeline, ctrlArmed]);
 
   useEffect(() => {
     if (focusRef) {
@@ -104,6 +128,7 @@ export function LiveInputCapture({ send, focusRef, sendKeyRef }: Props) {
       spellCheck={false}
       enterKeyHint="enter"
       onKeyDown={onKeyDown}
+      onBlur={onBlur}
       onInput={(e) => pipeline.fieldInput(e.currentTarget.value)}
       onCompositionStart={() => pipeline.compositionStart()}
       onCompositionEnd={(e) =>

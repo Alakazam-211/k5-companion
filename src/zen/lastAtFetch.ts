@@ -11,7 +11,7 @@ import { fetchProjectGroupMessages } from "../api/projectGroups";
 import { scopeFor, serverMemory, type ServerScope } from "../api/scope";
 import { attachmentCountLabel } from "../api/threadAttachmentPure";
 import type { RowLast } from "./rowPreview";
-import { DELETED_TEXT, isOwnerAuthored, normaliseThreadItem, threadAuthorKind, type ThreadMessage } from "./threadModel";
+import { DELETED_TEXT, cardFallback, isOwnerAuthored, normaliseThreadItem, threadAuthorKind, type ThreadMessage } from "./threadModel";
 import { noteThreadAddr } from "./unreadStore";
 
 // Multi-server (MA6): every key is `<serverId>|t:<addr>` or
@@ -174,6 +174,9 @@ function finite(v: unknown): number | null {
   return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
+/** Line two for a card with no words that this app can't draw. */
+export const CARD_TEXT = "Sent a card";
+
 /** The row snippet for a Thread message the phone already has. */
 export function rowLastFromMessage(
   m: ThreadMessage,
@@ -185,6 +188,9 @@ export function rowLastFromMessage(
   if (m.deleted) text = DELETED_TEXT;
   // A files-only message (K2 0.46.1): `[file]` / `[N files]`, never names.
   if (kind !== "secret" && !text.trim() && m.files?.length) text = attachmentCountLabel(m.files.length);
+  // A card this app can't draw, with no words: say a card came, never
+  // "No messages".
+  if (kind !== "secret" && !text.trim() && !m.deleted && cardFallback(m)) text = CARD_TEXT;
   return {
     at: m.at,
     seq: m.seq,

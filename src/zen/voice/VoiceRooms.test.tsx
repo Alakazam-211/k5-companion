@@ -26,7 +26,9 @@ import { useServersStore, type ServerEntry } from "../../stores/servers";
 import { __resetPipForTests, __setTileSenderForTests, HIDDEN, onPipEvent, type TileFrame } from "./videoTile";
 import type { CallShim } from "./callShim";
 import { __resetVoiceCallForTests, __setCallShimForTests, setPhoneVoiceEngine, useVoiceCall } from "./voiceCall";
+import { __resetVoiceNamesForTests, useVoiceNames } from "./voiceNames";
 import { voiceServers, VoiceRoomsOverlay } from "./VoiceRooms";
+import { useThemeStore } from "../../theme/themeStore";
 
 const server = (id: string, nickname: string) =>
   ({ id, nickname, url: `https://${id}.k2.dev` }) as unknown as ServerEntry;
@@ -65,6 +67,7 @@ const LIST = {
 
 beforeEach(() => {
   __resetVoiceCallForTests();
+  __resetVoiceNamesForTests();
   __resetPipForTests();
   scopes.hosts = new Set(["s1"]);
   api.rooms.mockReset();
@@ -177,7 +180,24 @@ describe("voice rooms on the phone", () => {
     expect(screen.queryByTestId("voice-call-bar")).toBeNull();
   });
 
-  it("shows a recording notice with the kit's answers, and sends the one picked", async () => {
+  it("a call holds the dark palette while on screen, in Veil too, and lets go when it ends or closes", async () => {
+    useServersStore.setState({ servers: [{ id: "s1", nickname: "skylab", url: "https://sew.example", username: "r", rememberPassword: false }], tokens: { s1: "t" }, activeServerId: "s1" } as never);
+    const room = { serverId: "s1", serverLabel: "skylab", roomId: "room-1", roomName: "Standup", limit: 25 };
+    const holds = () => useThemeStore.getState().darkHolds;
+    const before = holds();
+    const { unmount } = render(<VoiceRoomsOverlay onClose={() => {}} />);
+    expect(holds()).toBe(before);
+    act(() => useVoiceCall.setState({ phase: "connected", room, consent: null }));
+    expect(holds()).toBe(before + 1);
+    act(() => useVoiceCall.setState({ phase: "idle", room: null }));
+    expect(holds()).toBe(before);
+    act(() => useVoiceCall.setState({ phase: "connected", room, consent: null }));
+    expect(holds()).toBe(before + 1);
+    unmount();
+    expect(holds()).toBe(before);
+  });
+
+  it("shows K2's own recording notice (OK or Don't join), and sends the answer", async () => {
     const answer = vi.fn(async () => {});
     useVoiceCall.setState({
       phase: "joining",
@@ -185,23 +205,31 @@ describe("voice rooms on the phone", () => {
       consent: {
         ask: "join",
         noticeVersion: 3141,
-        title: "This call is being recorded",
-        text: "Sew Notes records this call.",
-        choices: [
-          { label: "Join and allow recording", granted: true },
-          { label: "Join without being recorded", granted: false },
-          { label: "Cancel", granted: null },
-        ],
+        startedByName: "Alice",
+        required: false,
+        audioKeepDays: 0,
+        appReaders: [],
+        agentReaders: false,
       },
       answerConsent: answer,
     });
+    useVoiceNames.setState({ agentReaders: { s1: true } });
     render(<VoiceRoomsOverlay onClose={() => {}} />);
-    expect(screen.getByTestId("voice-consent").textContent).toContain("This call is being recorded");
+    // K2's own notice for its rooms (K2 0.46.11): OK, or don't join.
+    const notice = screen.getByTestId("voice-consent").textContent ?? "";
+    expect(notice).toContain("Standup is being recorded");
+    expect(notice).toContain("Alice started recording this call.");
+    expect(notice).toContain("The audio is deleted once the transcript is final.");
+    expect(notice).toContain("Agents on this server may read the transcript.");
+    expect(notice).toContain("Joining means being recorded.");
     expect(screen.getByTestId("voice-call-bar").textContent).toContain("Waiting for your answer…");
-    const choices = screen.getAllByTestId("voice-consent-choice").map((b) => b.textContent);
-    expect(choices).toEqual(["Join and allow recording", "Join without being recorded", "Cancel"]);
-    fireEvent.click(screen.getAllByTestId("voice-consent-choice")[1]);
-    expect(answer).toHaveBeenCalledWith(false);
+    expect(screen.queryByTestId("voice-consent-choice")).toBeNull();
+    expect(screen.getByTestId("voice-consent-ok").textContent).toBe("OK");
+    expect(screen.getByTestId("voice-consent-leave").textContent).toBe("Don't join");
+    fireEvent.click(screen.getByTestId("voice-consent-leave"));
+    expect(answer).toHaveBeenCalledWith(null);
+    fireEvent.click(screen.getByTestId("voice-consent-ok"));
+    expect(answer).toHaveBeenCalledWith(true);
   });
 
   it("in a call with video, shows the tile once a frame plays; the tap starts PiP; a stall takes it away", async () => {
@@ -248,9 +276,7 @@ describe("voice rooms on the phone", () => {
     const sheet = {
       ask: "in_call" as const,
       noticeVersion: 1,
-      title: "t",
-      text: "x",
-      choices: [{ label: "OK", granted: true }],
+      startedByName: null, required: false, audioKeepDays: 0, appReaders: [], agentReaders: false,
     };
     useVoiceCall.setState({ phase: "connected", room, video: true });
     onPipEvent({ event: "pip_first_frame" });

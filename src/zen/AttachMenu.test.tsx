@@ -14,6 +14,7 @@ import { useVoiceCall } from "./voice/voiceCall";
 import { BookmarkPlusIcon } from "./icons";
 import { backHandlerCount, handleAndroidBack } from "../lib/androidBack";
 import menuSrc from "./AttachMenu.tsx?raw";
+import { KEYBOARD_RETURN_MS } from "../lib/nativeKeyboard";
 
 const picker = vi.hoisted(() => ({
   available: vi.fn(() => false),
@@ -27,6 +28,16 @@ vi.mock("../lib/nativePicker", async (orig) => {
     nativePickerAvailable: picker.available,
     nativePick: picker.pick,
   };
+});
+
+// The shell: `ios_keyboard_allow_focus` arms WebKit's keyboard for the
+// next focus (focusWithKeyboard).
+const core = vi.hoisted(() => ({
+  invoke: vi.fn(async (cmd: string) => cmd === "ios_keyboard_allow_focus"),
+}));
+vi.mock("@tauri-apps/api/core", async (orig) => {
+  const real = await orig<typeof import("@tauri-apps/api/core")>();
+  return { ...real, invoke: core.invoke };
 });
 
 let cssSrc = "";
@@ -379,6 +390,149 @@ describe("AttachMenu: choosing (native pickers)", () => {
     expect(clicked).toEqual([]);
     expect(onAttachError).toHaveBeenCalledWith("Could not open the picker.");
     warn.mockRestore();
+  });
+});
+
+/** Let the shell round trip finish (dynamic import + invoke) without
+ *  touching the faked setTimeout (vi.waitFor would advance it). */
+async function until(check: () => boolean) {
+  const tick = () =>
+    new Promise<void>((r) => (globalThis as unknown as { setImmediate: (f: () => void) => void }).setImmediate(r));
+  for (let i = 0; i < 50 && !check(); i += 1) await act(async () => tick());
+}
+
+describe("AttachMenu: back from a picker on iOS (the keyboard)", () => {
+  const w = window as unknown as { __TAURI_INTERNALS__?: unknown };
+  beforeEach(() => {
+    w.__TAURI_INTERNALS__ = {};
+    core.invoke.mockClear();
+  });
+  afterEach(() => {
+    delete w.__TAURI_INTERNALS__;
+    vi.useRealTimers();
+  });
+  /** The shell's UIKeyboardWill* (useViewportHeight re-dispatches it). */
+  const keyboardWill = (show: boolean) =>
+    act(() => {
+      window.dispatchEvent(new CustomEvent("k2-keyboard-will", { detail: { show, active: true } }));
+    });
+  const allowCalls = () => core.invoke.mock.calls.filter(([c]) => c === "ios_keyboard_allow_focus").length;
+  /** Photo Library, held open until `answer`. */
+  function openLibrary() {
+    picker.available.mockReturnValue(true);
+    let answer!: (r: unknown) => void;
+    picker.pick.mockReturnValue(new Promise((r) => (answer = r)));
+    render(<Harness />);
+    openMenu();
+    expect(plus().hasAttribute("data-lit")).toBe(true);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Photo Library" }));
+    return (r: unknown) => answer(r);
+  }
+  const cancelled = { files: [], skipped: [], cancelled: true };
+
+  it("a cancelled Photo Library asks for the keyboard back, and rests (blurred) when none comes — the owner 2026-11-20", async () => {
+    const answer = openLibrary();
+    // The picker takes the screen and the keyboard (the shell's DidHide
+    // resigns the field).
+    keyboardWill(false);
+    field().blur();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => answer(cancelled));
+    expect(document.activeElement).toBe(field());
+    expect(plus().hasAttribute("data-lit")).toBe(false);
+    await until(() => allowCalls() === 1);
+    expect(allowCalls()).toBe(1);
+    // WebKit kept the caret and raised no keyboard: a focused field would
+    // hold the composer's typing gap over the home indicator.
+    act(() => {
+      vi.advanceTimersByTime(KEYBOARD_RETURN_MS - 1);
+    });
+    expect(document.activeElement).toBe(field());
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(document.activeElement).not.toBe(field());
+  });
+
+  it("the keyboard coming back keeps the field focused", async () => {
+    const answer = openLibrary();
+    keyboardWill(false);
+    field().blur();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => answer(cancelled));
+    await until(() => allowCalls() === 1);
+    expect(allowCalls()).toBe(1);
+    keyboardWill(true);
+    act(() => {
+      vi.advanceTimersByTime(KEYBOARD_RETURN_MS * 2);
+    });
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("a pick the keyboard never left for (hardware keyboard) is only refocused, never blurred", async () => {
+    const answer = openLibrary();
+    field().blur();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await act(async () => answer(cancelled));
+    await until(() => allowCalls() === 1);
+    expect(allowCalls()).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(KEYBOARD_RETURN_MS * 2);
+    });
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("a cancelled camera (web input on iOS) does the same", async () => {
+    picker.available.mockReturnValue(true);
+    render(<Harness />);
+    stubInputs();
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Take Photo or Video" }));
+    expect(plus().hasAttribute("data-lit")).toBe(false);
+    keyboardWill(false);
+    field().blur();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent(screen.getByTestId("composer-camera-input"), new Event("cancel"));
+    expect(document.activeElement).toBe(field());
+    await until(() => allowCalls() === 1);
+    expect(allowCalls()).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(KEYBOARD_RETURN_MS);
+    });
+    expect(document.activeElement).not.toBe(field());
+  });
+
+  it("Android / the web: a plain refocus, no keyboard request, no blur", async () => {
+    picker.available.mockReturnValue(false);
+    render(<Harness />);
+    stubInputs();
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Choose Files" }));
+    keyboardWill(false);
+    field().blur();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    fireEvent(screen.getByTestId("composer-file-input"), new Event("cancel"));
+    expect(document.activeElement).toBe(field());
+    await act(async () => {});
+    act(() => {
+      vi.advanceTimersByTime(KEYBOARD_RETURN_MS * 2);
+    });
+    expect(allowCalls()).toBe(0);
+    expect(document.activeElement).toBe(field());
+  });
+
+  it("＋ unlights when its press ends somewhere else (a sheet took the screen)", () => {
+    render(<Harness />);
+    fireEvent.pointerDown(plus());
+    expect(plus().hasAttribute("data-lit")).toBe(true);
+    fireEvent.pointerUp(document.body);
+    expect(plus().hasAttribute("data-lit")).toBe(false);
+    fireEvent.pointerDown(plus());
+    expect(plus().hasAttribute("data-lit")).toBe(true);
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+    expect(plus().hasAttribute("data-lit")).toBe(false);
   });
 });
 

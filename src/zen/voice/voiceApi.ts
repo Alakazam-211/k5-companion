@@ -1,6 +1,6 @@
 import type { ServerScope } from "../../api/scope";
 import { scopedFetch } from "../../api/scopedFetch";
-import { parseVoiceRooms, type VoiceRoomsList } from "./voiceWire";
+import { parseRecordingControlsAnswer, parseVoiceRooms, type RecordingControlsAnswer, type VoiceRoomsList } from "./voiceWire";
 
 // The rooms list, read from each hosting server with its own login (as Home
 // gathers agents). Joining, renewal and leaving don't come through here: the
@@ -65,4 +65,35 @@ export async function leaveVoiceSession(scope: ServerScope, callId: string): Pro
 /** `voice_rooms_changed {rev}`: re-read the list. */
 export function isVoiceRoomsChanged(frame: unknown): boolean {
   return !!frame && typeof frame === "object" && (frame as { kind?: unknown }).kind === "voice_rooms_changed";
+}
+
+export type RecordingControlsResult =
+  | { ok: true; answer: RecordingControlsAnswer }
+  /** `unsupported`: a K2 before 0.46.11 (no route): no Record button. */
+  | { ok: false; code: "unsupported" | "failed"; status: number };
+
+/** `POST /cli/voice/recording/controls {room}` (K2 0.46.11): the person's
+ *  own rights in the room, for the plugin's Record and Stop. No boot flag:
+ *  an older server answers 404. */
+export async function fetchRecordingControls(scope: ServerScope, roomId: string): Promise<RecordingControlsResult> {
+  try {
+    const out = await scopedFetch(scope, "/cli/voice/recording/controls", {
+      method: "POST",
+      body: JSON.stringify({ room: roomId }),
+      headers: { "Content-Type": "application/json" },
+      priority: "user",
+    });
+    if (out.status === 404 || out.status === 405) return { ok: false, code: "unsupported", status: out.status };
+    if (!out.ok) return { ok: false, code: "failed", status: out.status };
+    return { ok: true, answer: parseRecordingControlsAnswer(JSON.parse(out.text), roomId) };
+  } catch {
+    return { ok: false, code: "failed", status: 0 };
+  }
+}
+
+/** `{"kind":"access_changed"}`: this login's access changed; re-read what
+ *  it may do. (K2 sends it on `me.events` for App passes; a phone login's
+ *  own hub carries it only if K2 forwards it there.) */
+export function isAccessChanged(frame: unknown): boolean {
+  return !!frame && typeof frame === "object" && (frame as { kind?: unknown }).kind === "access_changed";
 }

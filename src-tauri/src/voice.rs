@@ -12,6 +12,8 @@
 //!   calls. Native both ways, so a call keeps working with the webview asleep.
 //! - [`PipSink`]: while the call has video, Sew's native sink on the active
 //!   speaker feeds the picture in picture (K2PiP.swift).
+//! - [`self_view`]: your own camera on the call screen's tile, from Sew's
+//!   `local:camera` native sink into K2SelfView.swift (about one frame late).
 //! - [`ScreenRing`]: the iPhone screen share. Once a call is connected the
 //!   broadcast extension's ring (K2Broadcast) is armed in the App Group's
 //!   container, and the share's state goes to the call screen.
@@ -36,10 +38,16 @@ use tauri_plugin_sew_voice::native::{NativePayload, NativeSink, NativeSinkTarget
 use tauri_plugin_sew_voice::sew_call_client::Recording;
 use tauri_plugin_sew_voice::{
     AppScene, BoxFuture, CallState, ConsentAnswer, DeviceError, DeviceKeyId, HardwareDeviceKey, JoinAnswer,
-    JoinArgs, JoinOptions, JoinProvider, JoinRequest, ProviderError, RecordingInfo, SelfMute, StateEvent, VoiceControl,
-    VoiceListener,
+    JoinArgs, JoinOptions, JoinProvider, JoinRequest, ProviderError, RecordingControl, RecordingInfo, RecordingRequest,
+    SelfMute, StateEvent, VoiceControl, VoiceListener, RECORDING_UNSUPPORTED,
 };
 use tauri_plugin_sew_voice::{ConsentAsk, ConsentPrompt, ErrorInfo};
+
+/// The call's event feed for Sew's `perms_changed` (K2 0.46.17).
+pub mod feed;
+
+/// The native self-view (Sew's `local:camera` sink into K2SelfView.swift).
+pub mod self_view;
 
 /// The longest a daemon takes to answer a join (K2 desktop's figure: a
 /// reconnecting lane, the member gate and Sew's answer add up to 51 s).
@@ -67,6 +75,8 @@ pub struct Native {
     pip: Arc<OnceLock<mpsc::Sender<ToSink>>>,
     /// The CallKit thread ([`callkit_loop`]), for a join with the camera.
     shim: Arc<OnceLock<mpsc::Sender<ToShim>>>,
+    /// The self-view's thread ([`self_view::self_loop`]).
+    self_view: Arc<OnceLock<mpsc::Sender<self_view::ToSelf>>>,
     /// Whom the picture shows (the sink's last `Switched`), for a call
     /// screen opened after the event went by.
     speaker: Arc<Mutex<Value>>,
@@ -159,6 +169,13 @@ impl Native {
         }
     }
 
+    /// To the self-view's thread. Only queues: safe in a listener.
+    fn to_self_view(&self, msg: self_view::ToSelf) {
+        if let Some(tx) = self.self_view.get() {
+            let _ = tx.send(msg);
+        }
+    }
+
     /// The Keychain's token for `server`, off the async runtime's workers.
     async fn token(&self, server: &str) -> Option<String> {
         let app = self.app()?;
@@ -187,6 +204,7 @@ pub fn plugin(native: &Native) -> tauri::plugin::TauriPlugin<Wry> {
         .name("k2-pip".into())
         .spawn(move || pip_loop(&mut pip_sink, pip_rx))
         .expect("the PiP thread starts");
+    let _ = native.self_view.set(self_view::start(native));
     // Noise removal (feature `dfn3`): at start the plugin checks
     // DeepFilterNet3's weights (their pinned sha256, on a thread of its own)
     // at its default place, `dfn3/dfn3_ll.nnef.tar` in the app's resource
@@ -296,6 +314,14 @@ pub fn set_hosts(native: &Native, hosts: HashMap<String, String>) {
     });
 }
 
+/// The call screen's self-view tile (`tile`: shown) and your camera (`camera`:
+/// on or paused), from the webview whenever either changes. The native
+/// self-view's sink is open while both are true in a call.
+pub fn set_self_view(native: &Native, tile: bool, camera: bool) {
+    native.to_self_view(self_view::ToSelf::Tile(tile));
+    native.to_self_view(self_view::ToSelf::Camera(camera));
+}
+
 /// A join with the camera on ("Join with camera"): the system call starts as
 /// a video call (`CXStartCallAction.isVideo`), and Sew turns the camera on
 /// once the call is connected and the app is in front (never from the lock
@@ -310,7 +336,7 @@ pub async fn join_with_camera(control: &VoiceControl, native: &Native, target: S
     // Before the join: the system call starts on its first `connecting`.
     to_shim(true);
     native.note("join with camera");
-    let args = JoinArgs { target, room, muted: None, deafened: None };
+    let args = JoinArgs::new(target, room);
     match control.join_with(args, JoinOptions::with_camera()).await {
         Ok(joined) => Ok(serde_json::to_value(joined).unwrap_or(Value::Null)),
         Err(e) => {
@@ -452,10 +478,46 @@ impl K2Provider {
             self.post(&format!("{base}/cli/voice/recording/consent"), &token, &body).await?;
         consent_from(status, retry_after, &bytes, &token)
     }
+
+    /// Record → `recording/start {room}`, Stop → `recording/stop
+    /// {recordingId}` (K2 0.46.11; as K2 desktop's provider). The webview
+    /// presses Record or Stop through the plugin (`start_recording` /
+    /// `stop_recording`), which hands the request here; K2 maps the room (a
+    /// slug, or Sew's channel id after a move) and calls Sew with the
+    /// person's own session.
+    async fn recording_inner(&self, req: RecordingRequest) -> Result<Recording, ProviderError> {
+        let (route, body) = recording_body(&req)?;
+        let (base, token) = self.login(&req.target).await?;
+        let (status, retry_after, bytes) = self.post(&format!("{base}/cli/voice/{route}"), &token, &body).await?;
+        recording_answer_from(status, retry_after, &bytes, &token, RECORDING_UNSUPPORTED)
+    }
+}
+
+/// Record and Stop's route (under `/cli/voice/`) and body.
+pub fn recording_body(req: &RecordingRequest) -> Result<(&'static str, Value), ProviderError> {
+    match (req.action, req.recording_id) {
+        (RecordingControl::Start, _) => Ok(("recording/start", json!({ "room": req.room }))),
+        (RecordingControl::Stop, Some(id)) => Ok(("recording/stop", json!({ "recordingId": id.to_string() }))),
+        (RecordingControl::Stop, None) => Err(refused("no_recording", "there is no recording to stop")),
+        _ => Err(refused(RECORDING_UNSUPPORTED, "this K2 doesn't know that recording action")),
+    }
 }
 
 /// What the daemon answered a recording answer with, as the plugin's types.
 pub fn consent_from(status: u16, retry_after_secs: Option<u64>, body: &[u8], token: &str) -> Result<Recording, ProviderError> {
+    recording_answer_from(status, retry_after_secs, body, token, tauri_plugin_sew_voice::CONSENT_UNSUPPORTED)
+}
+
+/// The daemon's answer to a consent, Record or Stop: `{recording}` (or
+/// Sew's own) → the recording; a refusal as Sew's; a K2 without the route
+/// → `unsupported` (for a consent: not recorded, the safe side).
+pub fn recording_answer_from(
+    status: u16,
+    retry_after_secs: Option<u64>,
+    body: &[u8],
+    token: &str,
+    unsupported: &str,
+) -> Result<Recording, ProviderError> {
     let v: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let code = v.pointer("/error/code").and_then(Value::as_str);
     match (status, code) {
@@ -474,8 +536,8 @@ pub fn consent_from(status: u16, retry_after_secs: Option<u64>, body: &[u8], tok
         (404, Some("recording_not_found" | "voice_rooms_off")) => {
             Err(clean(ProviderError::from_sew_error(status, None, body), token))
         }
-        // A K2 before the consent route (0.46.9): not recorded, the safe side.
-        (404 | 405, _) => Err(refused(tauri_plugin_sew_voice::CONSENT_UNSUPPORTED, "this server can't take a recording answer yet")),
+        // A K2 before the route (consent 0.46.9, Record and Stop 0.46.11).
+        (404 | 405, _) => Err(refused(unsupported, "this server can't do that with a recording yet")),
         _ => Err(clean(ProviderError::from_sew_error(status, retry_after_secs.map(|s| s * 1000), body), token)),
     }
 }
@@ -493,6 +555,15 @@ impl JoinProvider for K2Provider {
         Box::pin(async move {
             let answer = self.consent_inner(answer).await;
             self.native.note(&format!("consent answer {}", outcome(answer.as_ref().err())));
+            answer
+        })
+    }
+
+    fn recording(&self, req: RecordingRequest) -> BoxFuture<'_, Result<Recording, ProviderError>> {
+        Box::pin(async move {
+            let what = if req.action == RecordingControl::Stop { "stop" } else { "record" };
+            let answer = self.recording_inner(req).await;
+            self.native.note(&format!("recording {what} {}", outcome(answer.as_ref().err())));
             answer
         })
     }
@@ -848,6 +919,7 @@ impl VoiceListener for CallKitBridge {
         if matches!(state.state, CallState::Ended { .. } | CallState::Idle) {
             self.native.to_pip(ToSink::Ended);
         }
+        self.native.to_self_view(self_view::ToSelf::Call(self_view::in_call(&state.state)));
         let _ = self.tx.send(ToShim::State(state.clone()));
         self.native.note(&state_line(&state.state));
         let _ = self.watch.send(Watched::State(state.state.clone()));
@@ -899,21 +971,21 @@ impl CallKitBridge {
 
 /// What the sheet shows, while this person still owes an answer.
 fn consent_sheet(r: &RecordingInfo, ask: ConsentAsk) -> Option<Value> {
+    // K2's own notice for its rooms (K2 0.46.11, as desktop's
+    // recording-controls.ts): every room the phone joins is a K2 room, so
+    // it's OK or leave, never Sew's per-person choices. The page words it
+    // (voiceWire.ts recordingNoticeText) from these facts.
     let prompt: &ConsentPrompt = r.consent_prompt.as_ref().filter(|_| r.my_consent == "pending")?;
-    let starter = prompt.started_by.clone();
-    let name = move |id| match &starter {
-        Some(m) if m.member_id == id => m.display_name.clone(),
-        _ => "someone".to_owned(),
-    };
-    let choices: Vec<Value> =
-        prompt.choices_en(ask).iter().map(|c| json!({ "label": c.label, "granted": c.granted })).collect();
+    let started_by = prompt.started_by.as_ref().map(|m| m.display_name.clone()).filter(|n| !n.trim().is_empty());
     Some(json!({
         "ask": if ask == ConsentAsk::Join { "join" } else { "in_call" },
         "recordingId": r.recording_id,
         "noticeVersion": prompt.notice_version,
-        "title": prompt.title_en(ask),
-        "text": prompt.text_en(ask, &name),
-        "choices": choices,
+        "startedByName": started_by,
+        "required": prompt.required,
+        "audioKeepDays": prompt.audio_keep_days,
+        "appReaders": prompt.app_readers,
+        "agentReaders": prompt.agent_readers,
     }))
 }
 
@@ -999,6 +1071,10 @@ fn callkit_loop(native: &mut impl CallOps, rx: mpsc::Receiver<ToShim>) {
                         video = false;
                     }
                 }
+                // A state a later plugin adds (CallState is #[non_exhaustive]
+                // since 0.9.0): the system call stays as it is until a known
+                // state says otherwise.
+                _ => {}
             },
             ToShim::Muted(muted) => {
                 if up {
@@ -1831,7 +1907,7 @@ struct Notice {
 }
 
 /// The local notification for a notice waiting on this person, in plain
-/// words (the sheet itself has the kit's).
+/// words (the sheet itself has K2's: OK or leave).
 fn recording_notice(r: &RecordingInfo, waiting: Waiting) -> Option<Notice> {
     let prompt = r.consent_prompt.as_ref().filter(|_| r.my_consent == "pending")?;
     let what = Some(prompt.feature_label.trim()).filter(|l| !l.is_empty()).unwrap_or("A recorder");
@@ -1842,11 +1918,12 @@ fn recording_notice(r: &RecordingInfo, waiting: Waiting) -> Option<Notice> {
     let (title, body) = match waiting {
         Waiting::InCall => (
             "Recording started",
-            format!("{what} is recording {call}. Open K2 to choose whether you're recorded. You aren't until you say yes."),
+            // K2's rooms: OK or leave (K2 0.46.11), never "don't record me".
+            format!("{what} is recording {call}. Open K2 to say OK or leave the call. You aren't recorded until you say OK."),
         ),
         Waiting::Join => (
             "This room is recorded",
-            format!("{what} is recording {call}. Open K2 to choose how to join."),
+            format!("{what} is recording {call}. Open K2 to say OK and join, or not join."),
         ),
         Waiting::Rejoin => (
             "Recording started",
@@ -1991,12 +2068,22 @@ impl Native {
 }
 
 /// A line from the page (the kit's camera calls and `local_video`): words
-/// as codes only, at most 6, so nothing but codes reaches the log.
+/// as codes only, at most 6, so nothing but codes reaches the log. A
+/// `noise` line (sewVoice.ts's `noiseWords`: every field of the plugin's
+/// noise_removal event) keeps up to [`NOISE_WORDS`].
 pub fn note_from_page(native: &Native, words: &[String]) {
-    let line: Vec<String> = words.iter().take(6).map(|w| code(w)).collect();
-    if !line.is_empty() {
-        native.note(&line.join(" "));
+    if let Some(line) = page_line(words) {
+        native.note(&line);
     }
+}
+
+/// The most words a `noise` line keeps: today's event has about 25 fields.
+const NOISE_WORDS: usize = 48;
+
+fn page_line(words: &[String]) -> Option<String> {
+    let max = if words.first().map(String::as_str) == Some("noise") { NOISE_WORDS } else { 6 };
+    let line: Vec<String> = words.iter().take(max).map(|w| code(w)).collect();
+    (!line.is_empty()).then(|| line.join(" "))
 }
 
 /// The call log for "Send call log".
@@ -2035,13 +2122,23 @@ fn state_line(s: &CallState) -> String {
         CallState::Reconnecting { attempt } => format!("state reconnecting attempt={attempt}"),
         CallState::ConsentRequired { notice_version, .. } => format!("state consent_required notice={notice_version}"),
         CallState::Ended { reason } => format!("state ended reason={}", code(reason)),
+        // A state a later plugin adds (CallState is #[non_exhaustive]): its wire name.
+        other => format!("state {}", state_name(other)),
     }
+}
+
+/// A call state's wire name (`{"state": "<name>", ...}`), or `unknown`.
+fn state_name(s: &CallState) -> String {
+    serde_json::to_value(s)
+        .ok()
+        .and_then(|v| v.get("state").and_then(Value::as_str).map(code))
+        .unwrap_or_else(|| "unknown".to_owned())
 }
 
 /// A shim event (K2CallShim.swift): its name and the fields worth knowing.
 fn shim_line(event: &Value) -> String {
     let mut line = format!("system {}", code(event.get("event").and_then(Value::as_str).unwrap_or_default()));
-    for key in ["why", "route", "interface", "error"] {
+    for key in ["scene", "why", "route", "interface", "error"] {
         if let Some(v) = event.get(key).and_then(Value::as_str) {
             line.push_str(&format!(" {key}={}", code(v)));
         }
@@ -2250,20 +2347,45 @@ mod tests {
     }
 
     #[test]
-    fn consent_sheet_in_the_kits_words() {
+    fn consent_sheet_carries_k2s_notice_facts() {
         let sheet = consent_sheet(&held(), ConsentAsk::Join).unwrap();
         assert_eq!(sheet["ask"], "join");
         assert_eq!(sheet["noticeVersion"], 3141);
-        assert!(sheet["text"].as_str().unwrap().contains("Alice"), "{sheet}");
-        let labels: Vec<_> = sheet["choices"].as_array().unwrap().iter().map(|c| c["label"].clone()).collect();
-        assert_eq!(labels, vec![json!("Join and allow recording"), json!("Join without being recorded"), json!("Cancel")]);
-        assert_eq!(sheet["choices"][2]["granted"], Value::Null);
+        assert_eq!(sheet["startedByName"], "Alice", "{sheet}");
+        assert_eq!(sheet["audioKeepDays"], 30, "{sheet}");
+        assert!(sheet["appReaders"].is_array(), "{sheet}");
+        assert!(sheet["required"].is_boolean() && sheet["agentReaders"].is_boolean(), "{sheet}");
+        assert!(sheet.get("choices").is_none(), "K2's notice is OK or leave, worded by the page");
         let in_call = consent_sheet(&held(), ConsentAsk::InCall).unwrap();
-        assert_eq!(in_call["choices"][1]["label"], "Don't record me");
+        assert_eq!(in_call["ask"], "in_call");
         // Answered: nothing to show.
         let mut granted = held();
         granted.my_consent = "granted".into();
         assert!(consent_sheet(&granted, ConsentAsk::InCall).is_none());
+    }
+
+    fn rec_req(v: Value) -> RecordingRequest {
+        serde_json::from_value(v).expect("a RecordingRequest")
+    }
+
+    /// The plugin's `provider_request`s (contract `recording.controls`).
+    #[test]
+    fn record_and_stop_go_to_k2s_routes() {
+        let start = rec_req(json!({ "target": "s1", "room": "standup", "action": "start" }));
+        assert_eq!(recording_body(&start).unwrap(), ("recording/start", json!({ "room": "standup" })));
+        let stop = rec_req(json!({ "target": "s1", "room": "standup", "action": "stop", "recording_id": "48831765147549721" }));
+        assert_eq!(recording_body(&stop).unwrap(), ("recording/stop", json!({ "recordingId": "48831765147549721" })));
+        let nothing = rec_req(json!({ "target": "s1", "room": "standup", "action": "stop" }));
+        assert!(matches!(recording_body(&nothing), Err(ProviderError::Refused { code, .. }) if code == "no_recording"));
+    }
+
+    #[test]
+    fn a_k2_without_the_record_route_is_unsupported_and_a_refusal_keeps_sews_reason() {
+        let r = recording_answer_from(404, None, b"", "tok", RECORDING_UNSUPPORTED);
+        assert!(matches!(r, Err(ProviderError::Refused { ref code, .. }) if code == RECORDING_UNSUPPORTED), "{r:?}");
+        let body = json!({ "error": { "code": "recording_active", "message": "already" } }).to_string();
+        let r = recording_answer_from(409, None, body.as_bytes(), "tok", RECORDING_UNSUPPORTED);
+        assert!(matches!(r, Err(ProviderError::Refused { ref code, .. }) if code == "recording_active"), "{r:?}");
     }
 
     fn held_at(version: u32) -> CallState {
@@ -2340,6 +2462,36 @@ mod tests {
         assert_eq!(title, "This room is recorded");
     }
 
+    /// A page line keeps 6 words, a `noise` line every field (up to
+    /// NOISE_WORDS), each as a code: false, 0 and null stay.
+    #[test]
+    fn a_noise_line_keeps_every_field() {
+        let w = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(page_line(&w(&["camera", "a", "b", "c", "d", "e", "f"])).unwrap(), "camera a b c d e");
+        let noise = w(&[
+            "noise", "standard", "standard", "dfn3", "step_downs:0", "phone_mode:os", "in_grace:false",
+            "capture_stage_p99_us:6400", "dfn3_state:warming", "retry_in_ms:1500", "zz_new:null",
+        ]);
+        assert_eq!(
+            page_line(&noise).unwrap(),
+            "noise standard standard dfn3 step_downs:0 phone_mode:os in_grace:false capture_stage_p99_us:6400 \
+             dfn3_state:warming retry_in_ms:1500 zz_new:null"
+        );
+        let many: Vec<String> = std::iter::once("noise".to_owned()).chain((0..100).map(|i| format!("f{i}:0"))).collect();
+        assert_eq!(page_line(&many).unwrap().split(' ').count(), NOISE_WORDS);
+        assert_eq!(page_line(&[]), None);
+    }
+
+    /// The wildcard arm's line (a state a later plugin adds) uses the
+    /// state's wire name, the same as the known states' lines.
+    #[test]
+    fn a_state_names_itself_by_its_wire_name() {
+        assert_eq!(state_name(&CallState::Idle), "idle");
+        assert_eq!(state_name(&CallState::Reconnecting { attempt: 2 }), "reconnecting");
+        assert_eq!(state_name(&held_at(3)), "consent_required");
+        assert_eq!(state_name(&CallState::Ended { reason: "left".into() }), "ended");
+    }
+
     #[test]
     fn the_call_log_keeps_codes_and_the_last_300_lines() {
         assert_eq!(code("credential_lost"), "credential_lost");
@@ -2356,6 +2508,7 @@ mod tests {
         let ev = json!({ "event": "start_failed", "error": "callkit: 3", "call": "UUID-1", "token": "tok" });
         assert_eq!(shim_line(&ev), "system start_failed error=callkit:3");
         assert_eq!(shim_line(&json!({ "event": "mute_requested", "muted": true })), "system mute_requested muted=true");
+        assert_eq!(shim_line(&json!({ "event": "app_scene", "scene": "foreground" })), "system app_scene scene=foreground");
         assert_eq!(outcome(Some(&refused("room_full", "x"))), "refused room_full");
         assert_eq!(outcome(Some(&ProviderError::Other("https://a.example".into()))), "failed");
 

@@ -11,9 +11,9 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { SENDING_OPACITY, useDeliverBrighten } from "./useDeliverBrighten";
+import { SENDING_OPACITY, useDeliverBrighten } from "../kit/mobileChat/useDeliverBrighten";
 import { WorkspaceAvatar } from "./WorkspaceAvatar";
-import { chatRuns, receiptFor, receiptRow } from "./chatReceipt";
+import { chatRuns, pictureRows, receiptFor, receiptRow } from "./chatReceipt";
 import {
   clearThreadSearchPaint,
   currentMatchIndex,
@@ -61,6 +61,7 @@ import { StubMark } from "./StubMark";
 import {
   DELETED_TEXT,
   cardAuthorLabel,
+  cardFallback,
   cardOpen,
   closedCardLine,
   daemonClosedCard,
@@ -69,6 +70,7 @@ import {
   type ThreadMessage,
 } from "./threadModel";
 import { CardDismiss } from "./CardDismiss";
+import { CardFallback, SecretCard } from "./SecretCard";
 import { BookmarkPlusIcon, ReplyIcon } from "./icons";
 import { formatThreadReply, parseThreadReply, threadReplyFirstLine, type ThreadReplyTarget } from "./threadReply";
 import { MESSAGE_HOLD_ATTR, useMessageHold, useMessageSelection } from "./stash/useMessageHold";
@@ -123,7 +125,7 @@ import {
   runSendFly,
   type FlyMotion,
   type FlySource,
-} from "./sendFly";
+} from "../kit/mobileChat/sendFly";
 import {
   ARRIVAL_RECENT_MS,
   REPLY_FOLD_MS,
@@ -133,9 +135,9 @@ import {
   fadeInRows,
   incomingMotion,
   type ListGlider,
-} from "./listGlide";
+} from "../kit/mobileChat/listGlide";
 import { queueSend, requeueIfUnreachable, shouldQueueSend, useQueuedSendFlush } from "./sendQueue";
-import "./sendFly.css";
+import "../kit/mobileChat/sendFly.css";
 import "./chatBubbles.css";
 import { newestSeenSeq, type RowRef } from "./unread";
 import { useUnreadStore } from "./unreadStore";
@@ -410,6 +412,9 @@ const Bubble = memo(function Bubble({
 }) {
   const secret = m.kind === "secret";
   const choice = secret ? null : m.choice;
+  // A card this app can't draw, or a message that would draw nothing:
+  // the "open it in the K2 desktop app" card (never a silent blank).
+  const fallback = cardFallback(m);
   const answered =
     choice != null && choice.answer != null && String(choice.answer) !== "";
   // K2 0.46.11: a card a person dismissed or its agent withdrew (or one
@@ -457,7 +462,9 @@ const Bubble = memo(function Bubble({
         // holds. A card's words too (the list around them never selects).
         style={SELECTABLE}
       >
-      {choice?.permission ? (
+      {m.secret ? (
+        <SecretCard m={{ ...m, secret: m.secret }} canAnswer={canAnswer && !answerHeld} />
+      ) : choice?.permission ? (
         <ThreadPermissionCard card={choice.permission} id={m.id} enabled={canAnswer && !answerHeld} />
       ) : choice ? (
         <div>
@@ -555,6 +562,7 @@ const Bubble = memo(function Bubble({
           ) : null}
         </>
       )}
+      {fallback && !m.secret ? <CardFallback agent={m.from} /> : null}
       </div>
     </div>
   );
@@ -704,8 +712,9 @@ const ThreadRow = memo(function ThreadRow({
   /** Someone else's row: the sender column is shown (threadPictures).
    *  Undefined on your own rows, which never move. */
   pictureOn?: boolean;
-  /** The first of a run from someone else: the sender's picture, drawn
-   *  in the column and faded out while it's off, so both ways animate. */
+  /** The last of a run from someone else (pictureRows): the sender's
+   *  picture, at the bubble's bottom left, level with its tail; drawn in
+   *  the column and faded out while it's off, so both ways animate. */
   picture?: SenderPicture | null;
   /** The sender's name above the run (senderLabel): an agent's display
    *  name, not its handle. Falls back to `m.from`. */
@@ -733,8 +742,50 @@ const ThreadRow = memo(function ThreadRow({
       </div>
     );
   }
-  const wordless = !m.text.trim() && !m.choice;
+  const wordless = !m.text.trim() && !m.choice && !m.secret && !m.approval && !cardFallback(m);
   const bubble = !(files && wordless);
+  // Someone else's row (the sender column, on or off).
+  const column = pictureOn !== undefined;
+  const pictureNode =
+    picture && column ? (
+      <span
+        className="absolute bottom-0"
+        style={{ left: -(THREAD_PICTURE_PX + THREAD_PICTURE_GAP) }}
+        aria-hidden={!pictureOn}
+        data-thread-picture=""
+        data-testid="thread-msg-picture"
+      >
+        <WorkspaceAvatar
+          initial={picture.initial}
+          color={picture.color}
+          iconUrl={picture.iconUrl}
+          size={THREAD_PICTURE_PX}
+          fontSize={12}
+          fallback="#2c2c2e"
+        />
+      </span>
+    ) : null;
+  const bubbleNode = bubble ? (
+    <Bubble
+      m={m}
+      onFileLink={onFileLink}
+      canAnswer={canAnswer}
+      answerHeld={answerHeld}
+      answering={answering}
+      answerError={answerError}
+      onAnswer={onAnswer}
+      attachments={out?.files.length ? out.files : undefined}
+      flying={flying}
+      fadeIn={fadeIn}
+      breathe={out?.status === "sending"}
+      tail={runLast ? (m.mine ? "mine" : "theirs") : null}
+      holdable={messageHoldable(m, out)}
+      outlined={highlighted}
+      onStashOffer={onStashOffer}
+      foldKey={rowKey}
+      reveal={revealed}
+    />
+  ) : null;
   return (
     <div
       data-thread-msg=""
@@ -779,45 +830,20 @@ const ThreadRow = memo(function ThreadRow({
           </span>
         </span>
       ) : null}
-      {picture && pictureOn !== undefined ? (
-        <span
-          className="absolute top-0"
-          style={{ left: -(THREAD_PICTURE_PX + THREAD_PICTURE_GAP) }}
-          aria-hidden={!pictureOn}
-          data-thread-picture=""
-          data-testid="thread-msg-picture"
-        >
-          <WorkspaceAvatar
-            initial={picture.initial}
-            color={picture.color}
-            iconUrl={picture.iconUrl}
-            size={THREAD_PICTURE_PX}
-            fontSize={12}
-            fallback="#2c2c2e"
-          />
-        </span>
-      ) : null}
-      {bubble ? (
-        <Bubble
-          m={m}
-          onFileLink={onFileLink}
-          canAnswer={canAnswer}
-          answerHeld={answerHeld}
-          answering={answering}
-          answerError={answerError}
-          onAnswer={onAnswer}
-          attachments={out?.files.length ? out.files : undefined}
-          flying={flying}
-          fadeIn={fadeIn}
-          breathe={out?.status === "sending"}
-          tail={runLast ? (m.mine ? "mine" : "theirs") : null}
-          holdable={messageHoldable(m, out)}
-          outlined={highlighted}
-          onStashOffer={onStashOffer}
-          foldKey={rowKey}
-          reveal={revealed}
-        />
-      ) : null}
+      {/* Someone else's: the bubble in its own box, so the picture sits
+          against it (bottom left, level with the tail) and the files under
+          it never push it down. Always boxed, so the picture moving to a
+          newer bubble never remounts this one. No bubble (files only): the
+          picture at the row's bottom. */}
+      {bubbleNode && column ? (
+        <div className="relative min-w-0 max-w-full" data-thread-bubble-box="">
+          {bubbleNode}
+          {pictureNode}
+        </div>
+      ) : (
+        bubbleNode
+      )}
+      {!bubbleNode ? pictureNode : null}
       {files ? (
         <MessageFiles
           files={files}
@@ -1033,6 +1059,7 @@ export function ThreadPane({
   viewportInteractive = false,
   topInset,
   covered = false,
+  ariaHidden = false,
   roomBanner = null,
   roomQueuesInput = false,
   onComposerInput,
@@ -1048,6 +1075,8 @@ export function ThreadPane({
   topInset?: number;
   /** A full-screen overlay (file viewer) hides the Thread: not "viewing". */
   covered?: boolean;
+  /** A modal drawer is over the Thread: hidden from assistive tech. */
+  ariaHidden?: boolean;
   /** Multi-server room failure (MS36): shown above the composer; while
    *  set, input is off and the last messages stay. */
   roomBanner?: ReactNode;
@@ -2650,7 +2679,10 @@ export function ThreadPane({
   // iMessage runs (tails, tighter spacing, one meta line per run) and the
   // one "Delivered" / "Read" receipt (chatReceipt.ts). A send still flying
   // in (or fading in) is not confirmed yet: the label moves once it lands.
-  const runs = chatRuns(rows.map(({ m }) => ({ mine: m.mine, from: m.from, at: m.at, deleted: !!m.deleted })));
+  const runInputs = rows.map(({ m }) => ({ mine: m.mine, from: m.from, at: m.at, deleted: !!m.deleted }));
+  const runs = chatRuns(runInputs);
+  // The sender's picture: on the last bubble of each of someone else's runs.
+  const pictureAt = pictureRows(runInputs, runs);
   const pictureCache = useRef(new Map<string, SenderPicture>());
   const picturesOn = useThreadPicturesOn(
     `${zenServer}\n${groupId || agentId || ""}`,
@@ -2787,6 +2819,7 @@ export function ThreadPane({
       ref={rootRef}
       className="zen-thread-pane mchat-pane relative flex flex-col flex-1 min-h-0 min-w-0 overflow-x-hidden"
       style={{ fontFamily: "var(--zen-font)" }}
+      aria-hidden={ariaHidden || undefined}
     >
       <div
         ref={scrollerRef}
@@ -2963,7 +2996,7 @@ export function ThreadPane({
                 // Files ride Thread messages only (not project chat lines,
                 // not this phone's own optimistic sends).
                 const files = filesOn && !out && !groupId && m.files?.length ? m.files : null;
-                const wordless = !m.text.trim() && !m.choice;
+                const wordless = !m.text.trim() && !m.choice && !m.secret && !m.approval && !cardFallback(m);
                 // Files-only, on a server without the feature: nothing to draw.
                 if (wordless && !files && !out && m.files?.length) return null;
                 // A card the daemon closed by itself: not drawn (K2 isVoidedHitl).
@@ -2979,7 +3012,7 @@ export function ThreadPane({
                     files={files}
                     imagesOn={imagesOn}
                     pictureOn={m.mine ? undefined : picturesOn}
-                    picture={!m.mine && run.first ? pictureFor(m.from) : null}
+                    picture={pictureAt[i] ? pictureFor(m.from) : null}
                     fromLabel={!m.mine && run.first ? senderLabel(m.from, agents) : undefined}
                     runFirst={run.first}
                     runLast={run.last}

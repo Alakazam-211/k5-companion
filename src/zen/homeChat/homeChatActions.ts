@@ -50,6 +50,8 @@ import {
 import { authorName, convKey, homeChatDraftKey, memberNames, type HomeChatTarget } from "./homeChatModel";
 import { EMPTY_CONV, noteHomeChatMoved, useHomeChatStore, type SendState } from "./homeChatStore";
 import { useComposerDrafts } from "../composerDrafts";
+import { queuePersonAvatars } from "../../lib/avatarCache";
+import { notePeoplePictures } from "./personPictures";
 
 /** A page; the reopen delta reads this many after the newest held. */
 export const HOME_CHAT_PAGE = HOME_CHAT_PAGE_DEFAULT;
@@ -92,7 +94,12 @@ export function ensureHomeChatPeople(scope: ServerScope, force = false): Promise
   if (running) return running;
   const p = (async () => {
     const r = await fetchHomeChatPeople(scope);
-    if (r.ok) st().setPeople(scope.id, { me: r.me, people: r.people });
+    if (!r.ok) return;
+    st().setPeople(scope.id, { me: r.me, people: r.people });
+    // Their pictures, for a push's big image (the NSE has no network):
+    // a legacy data URL now, a `pictureRev` one once fetched.
+    queuePersonAvatars(scope.id, r.people);
+    void notePeoplePictures(scope.id, { me: r.me, people: r.people }, scope.username?.() ?? "");
   })().finally(() => peopleInflight.delete(scope.id));
   peopleInflight.set(scope.id, p);
   return p;
@@ -194,7 +201,14 @@ export async function loadHomeChatOlder(scope: ServerScope, conv: string): Promi
 export async function sendHomeChat(
   scope: ServerScope,
   conv: string,
-  send: { text: string; replyTo?: string | null }
+  send: { text: string; replyTo?: string | null },
+  opts: {
+    /** Called synchronously, in the caller's own handler, once the send
+     *  is in the store: its nonce (the row's key), and `fresh` when this
+     *  call added the optimistic bubble (false: a "Not sent" bubble of the
+     *  same words already on screen goes again). The view's send fly. */
+    onQueued?: (nonce: string, fresh: boolean) => void;
+  } = {}
 ): Promise<boolean> {
   const text = send.text.trim();
   if (!text) return false;
@@ -205,7 +219,7 @@ export async function sendHomeChat(
   );
   const pending = nonceForSend(kept?.pending ?? null, { conv, text, replyTo: send.replyTo ?? null });
   typingSent = typingForget(typingSent, conv);
-  return deliver(scope, key, pending);
+  return deliver(scope, key, pending, opts.onQueued);
 }
 
 /** Send a "Not sent" bubble again (its nonce: never posted twice). */
@@ -279,11 +293,18 @@ export function dropHomeChatSend(serverId: string, conv: string, nonce: string):
   return s?.pending ?? null;
 }
 
-async function deliver(scope: ServerScope, key: string, pending: PendingSend): Promise<boolean> {
+async function deliver(
+  scope: ServerScope,
+  key: string,
+  pending: PendingSend,
+  onQueued?: (nonce: string, fresh: boolean) => void
+): Promise<boolean> {
   const me = namesOn(scope.id).me ?? "";
   st().setSend(key, pending.nonce, { pending, status: "sending", error: null });
   const held = st().convs[key]?.messages.find((m) => m.id === `~${pending.nonce}`);
   if (!held) st().mergeMessages(key, [optimisticMessage(pending, me, Date.now())]);
+  // Before any await: the caller's commit has the row in it.
+  onQueued?.(pending.nonce, !held);
   // Dropped (Edit) while it waited: stop sending it.
   const wanted = () => !!st().sends[key]?.[pending.nonce];
   let r = await postSend(scope, pending, wanted);

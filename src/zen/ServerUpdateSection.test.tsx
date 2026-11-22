@@ -174,19 +174,19 @@ describe("ServerUpdateSection check", () => {
 });
 
 describe("ServerUpdateSection confirm + run", () => {
-  it("standalone: agents warning first, Download & install, Cancel closes", async () => {
+  it("standalone: agents keep running (no warning), Download & install, Cancel closes", async () => {
     renderSection("admin");
     fireEvent.click(await screen.findByTestId("server-update-update"));
     const sheet = screen.getByTestId("server-update-confirm");
     expect(within(sheet).getByTestId("server-update-confirm-title").textContent).toBe("Update Home to 0.46.1?");
-    const warning = within(sheet).getByTestId("server-update-confirm-warning");
-    expect(warning.textContent).toBe(
-      "Running agents on this server will be stopped and restarted. Anything they're in the middle of will be interrupted."
-    );
-    // First thing under the title.
-    expect(within(sheet).getByTestId("server-update-confirm-title").nextElementSibling).toBe(warning);
-    expect(within(sheet).getByTestId("server-update-confirm-body").textContent).toContain(
-      "the REMOTE machine you're connected to, not this phone"
+    // Updates don't interrupt agents (the owner 2026-11-19): no warning box.
+    expect(within(sheet).queryByTestId("server-update-confirm-warning")).toBeNull();
+    expect(sheet.textContent).not.toMatch(/stopped and restarted|interrupted/);
+    const body = within(sheet).getByTestId("server-update-confirm-body").textContent;
+    expect(body).toContain("the server you're connected to (not this phone)");
+    expect(body).toContain("Agents keep running through it.");
+    expect(within(sheet).getByTestId("server-update-confirm-note").textContent).toBe(
+      "Agents restart only if \"Agents keep running through updates and restarts\" is off in K2's Settings."
     );
     expect(within(sheet).getByTestId("server-update-confirm-go").textContent).toBe("Download & install");
     fireEvent.click(within(sheet).getByTestId("server-update-confirm-cancel"));
